@@ -1,0 +1,6 @@
+
+{
+  "name": "Industrial Scan Manager",
+  "description": "A robust, high-contrast barcode/QR code scanning application designed for factory and warehouse environments. Features real-time duplicate prevention, fixed timestamps, and CSV export capabilities.",
+  "requestFramePermissions": []
+}
