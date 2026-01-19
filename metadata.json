@@ -1,6 +1,6 @@
 
 {
-  "name": "Industrial Scan Manager",
-  "description": "A robust, high-contrast barcode/QR code scanning application designed for factory and warehouse environments. Features real-time duplicate prevention, fixed timestamps, and CSV export capabilities.",
+  "name": "Hệ Thống Quét Mã Pro",
+  "description": "Ứng dụng quét mã vạch/QR mạnh mẽ, độ tương phản cao dành cho môi trường nhà máy và kho bãi. Tính năng chống trùng lặp thời gian thực và xuất Excel.",
   "requestFramePermissions": []
 }
