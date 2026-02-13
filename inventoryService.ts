@@ -3,49 +3,52 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Kiểm tra nếu thiếu mã kết nối
-if (!supabaseUrl || !supabaseKey) {
-  console.error("THIẾU MÃ KẾT NỐI SUPABASE! Hãy kiểm tra Environment Variables trên Vercel.");
-}
-
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Khởi tạo client với giá trị mặc định nếu thiếu biến môi trường
+export const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 
 class InventoryService {
+  // Hàm lấy dữ liệu tổng hợp
   async getAllDataFromCloud() {
     try {
-      const [p, u, t, w] = await Promise.all([
+      const [p, u, w] = await Promise.all([
         supabase.from('products').select('*'),
         supabase.from('units').select('*'),
-        supabase.from('transactions').select('*').order('date', { ascending: false }),
         supabase.from('warehouses').select('*')
       ]);
-
+      
       return {
-        products: p.data || [],
-        units: u.data || [],
-        transactions: t.data || [],
-        warehouses: w.data && w.data.length > 0 ? w.data : [{ id: 'wh-default', name: 'Kho Tổng', maxCapacity: 1000 }]
+        products: Array.isArray(p.data) ? p.data : [],
+        units: Array.isArray(u.data) ? u.data : [],
+        warehouses: Array.isArray(w.data) && w.data.length > 0 ? w.data : [{ id: 'wh-default', name: 'Kho Tổng', maxCapacity: 1000 }]
       };
-    } catch (error) {
-      console.error("Lỗi tải dữ liệu:", error);
-      return { products: [], units: [], transactions: [], warehouses: [] };
+    } catch (e) {
+      console.error("Supabase Error:", e);
+      return { products: [], units: [], warehouses: [] };
     }
   }
 
-  // Các hàm bổ trợ bắt buộc phải trả về mảng [] nếu lỗi
-  async getProducts() {
-    const { data } = await supabase.from('products').select('*');
-    return Array.isArray(data) ? data : [];
-  }
-
+  // Cực kỳ quan trọng: Hàm này đang làm sập trang web của bạn
   async getUnits() {
-    const { data } = await supabase.from('units').select('*');
-    return Array.isArray(data) ? data : [];
+    try {
+      const { data } = await supabase.from('units').select('*');
+      return Array.isArray(data) ? data : []; // Luôn trả về mảng
+    } catch (e) {
+      return [];
+    }
   }
 
-  async getWarehouses() {
-    const { data } = await supabase.from('warehouses').select('*');
-    return Array.isArray(data) ? data : [];
+  async getProducts() {
+    try {
+      const { data } = await supabase.from('products').select('*');
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  getDrafts() {
+    const saved = localStorage.getItem('RO_MASTER_DRAFTS_V3');
+    return saved ? JSON.parse(saved) : { inbound: [], outbound: [], productionCheck: [] };
   }
 }
 
