@@ -1,6 +1,5 @@
-
 {
-  "name": "Hệ Thống Quét Mã Pro",
-  "description": "Ứng dụng quét mã vạch/QR mạnh mẽ, độ tương phản cao dành cho môi trường nhà máy và kho bãi. Tính năng chống trùng lặp thời gian thực và xuất Excel.",
+  "name": "RO-Master WMS VIP",
+  "description": "Specialized Warehouse Management System for RO Water Purifiers with IMEI tracking, inventory analytics, and AI-driven insights.",
   "requestFramePermissions": []
 }
