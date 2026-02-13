@@ -1,7 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import './index.css'; // Thêm dòng này vào dưới dòng import App
+
+// Đã xóa dòng import './index.css' để tránh lỗi "Could not resolve" trên Vercel
+// Nếu sau này bạn có file CSS, hãy tạo file đó trước rồi mới thêm lại dòng import
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
