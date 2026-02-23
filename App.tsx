@@ -23,7 +23,10 @@ import {
   Copy,
   Pencil,
   Check,
-  User
+  User,
+  ChevronLeft,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -119,21 +122,38 @@ interface CanvasProps {
   selectedIds: string[];
 }
 
-const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElements, onSelectElements, onUpdateViewport, selectedIds }) => {
-  const stageRef = useRef<any>(null);
-  const transformerRef = useRef<any>(null);
-  const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
-  const [isPanning, setIsPanning] = useState(false);
-  const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
-  const [dimensions, setDimensions] = useState({ width: window.innerWidth - 400, height: window.innerHeight - 150 });
-
-  useEffect(() => {
-    const handleResize = () => {
-      setDimensions({ width: window.innerWidth - 400, height: window.innerHeight - 150 });
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElements, onSelectElements, onUpdateViewport, selectedIds }) => {
+    const stageRef = useRef<any>(null);
+    const transformerRef = useRef<any>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
+    const [isPanning, setIsPanning] = useState(false);
+    const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
+    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  
+    useEffect(() => {
+      const updateDimensions = () => {
+        if (containerRef.current) {
+          setDimensions({
+            width: containerRef.current.offsetWidth,
+            height: containerRef.current.offsetHeight
+          });
+        }
+      };
+  
+      const resizeObserver = new ResizeObserver(updateDimensions);
+      if (containerRef.current) {
+        resizeObserver.observe(containerRef.current);
+      }
+  
+      updateDimensions();
+      window.addEventListener('resize', updateDimensions);
+      
+      return () => {
+        resizeObserver.disconnect();
+        window.removeEventListener('resize', updateDimensions);
+      };
+    }, []);
 
   useEffect(() => {
     if (selectedIds.length > 0 && transformerRef.current) {
@@ -566,7 +586,7 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
   };
 
   return (
-    <div className="w-full h-full bg-white overflow-hidden border border-slate-300 rounded-xl shadow-lg cursor-grab active:cursor-grabbing relative">
+    <div ref={containerRef} className="w-full h-full bg-white overflow-hidden border border-slate-300 rounded-xl shadow-lg cursor-grab active:cursor-grabbing relative">
       <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-mono text-slate-600 z-20 pointer-events-none flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className="font-bold text-indigo-600">SCALE:</span>
@@ -667,6 +687,29 @@ export default function App() {
   const [tempAppName, setTempAppName] = useState('');
   
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch(err => {
+        console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
   
   useEffect(() => {
     const updatedModels = { ...models, [currentModelName]: layout };
@@ -875,9 +918,10 @@ export default function App() {
   const selectedElement = layout.elements.find(el => selectedIds.length === 1 && el.id === selectedIds[0]);
 
   return (
-    <div className="flex h-screen bg-[#f8fafc] text-slate-900 font-sans overflow-hidden">
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
-        <div className="p-6 border-bottom border-slate-100">
+    <div ref={containerRef} className="flex h-screen bg-[#f8fafc] text-slate-900 font-sans overflow-hidden relative">
+      {/* Sidebar Left: Tools */}
+      <aside className={`bg-white border-r border-slate-200 flex flex-col shadow-sm z-20 transition-all duration-300 relative ${isSidebarOpen ? 'w-64' : 'w-0 overflow-hidden border-none'}`}>
+        <div className="p-6 border-bottom border-slate-100 min-w-[256px]">
           <div className="flex items-center gap-2 mb-2">
             <div className="bg-indigo-600 p-2 rounded-lg">
               <Factory className="text-white w-5 h-5" />
@@ -911,7 +955,7 @@ export default function App() {
           <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Thiết kế Layout</p>
         </div>
 
-        <div className="px-4 py-2 border-b border-slate-100">
+        <div className="px-4 py-2 border-b border-slate-100 min-w-[256px]">
           <div className="relative">
             <button 
               onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
@@ -1019,7 +1063,7 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
+        <nav className="flex-1 p-4 space-y-6 overflow-y-auto min-w-[256px]">
           <section>
             <h2 className="text-xs font-semibold text-slate-400 uppercase mb-3 px-2">Thêm thiết bị</h2>
             <div className="grid grid-cols-2 gap-2">
@@ -1166,7 +1210,18 @@ export default function App() {
         </nav>
       </aside>
 
+      {/* Toggle Sidebar Button */}
+      <button 
+        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+        className={`absolute top-1/2 -translate-y-1/2 z-30 bg-white border border-slate-200 p-1 rounded-full shadow-md hover:bg-slate-50 transition-all duration-300 ${isSidebarOpen ? 'left-[244px]' : 'left-2'}`}
+        title={isSidebarOpen ? "Ẩn thanh công cụ" : "Hiện thanh công cụ"}
+      >
+        <ChevronLeft className={`w-4 h-4 text-slate-600 transition-transform duration-300 ${isSidebarOpen ? '' : 'rotate-180'}`} />
+      </button>
+
+      {/* Main Content */}
       <main className="flex-1 flex flex-col relative overflow-hidden">
+        {/* Header Toolbar */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-10">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
@@ -1175,6 +1230,13 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button 
+              onClick={toggleFullscreen}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              {isFullscreen ? "Thoát toàn màn hình" : "Toàn màn hình"}
+            </button>
             <button 
               onClick={resetView}
               className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
@@ -1188,15 +1250,10 @@ export default function App() {
             >
               <ArrowRightLeft className="w-4 h-4 rotate-180" /> Hoàn tác (Ctrl+Z)
             </button>
-            <button className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
-              <Save className="w-4 h-4" /> Lưu bản thảo
-            </button>
-            <button className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 rounded-lg transition-colors">
-              <Download className="w-4 h-4" /> Xuất Layout
-            </button>
           </div>
         </header>
 
+        {/* Canvas Area */}
         <div className="flex-1 p-6 bg-slate-50 relative">
           <Canvas 
             layout={layout} 
