@@ -122,38 +122,38 @@ interface CanvasProps {
   selectedIds: string[];
 }
 
-  const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElements, onSelectElements, onUpdateViewport, selectedIds }) => {
-    const stageRef = useRef<any>(null);
-    const transformerRef = useRef<any>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
-    const [isPanning, setIsPanning] = useState(false);
-    const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
-    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  
-    useEffect(() => {
-      const updateDimensions = () => {
-        if (containerRef.current) {
-          setDimensions({
-            width: containerRef.current.offsetWidth,
-            height: containerRef.current.offsetHeight
-          });
-        }
-      };
-  
-      const resizeObserver = new ResizeObserver(updateDimensions);
+const Canvas: React.FC<CanvasProps> = React.memo(({ layout, onUpdateElement, onUpdateElements, onSelectElements, onUpdateViewport, selectedIds }) => {
+  const stageRef = useRef<any>(null);
+  const transformerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const updateDimensions = () => {
       if (containerRef.current) {
-        resizeObserver.observe(containerRef.current);
+        setDimensions({
+          width: containerRef.current.offsetWidth,
+          height: containerRef.current.offsetHeight
+        });
       }
-  
-      updateDimensions();
-      window.addEventListener('resize', updateDimensions);
-      
-      return () => {
-        resizeObserver.disconnect();
-        window.removeEventListener('resize', updateDimensions);
-      };
-    }, []);
+    };
+
+    const resizeObserver = new ResizeObserver(updateDimensions);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateDimensions);
+    };
+  }, []);
 
   useEffect(() => {
     if (selectedIds.length > 0 && transformerRef.current) {
@@ -276,7 +276,7 @@ interface CanvasProps {
       
       stage.position({ x: newX, y: newY });
       setLastPanPos(pos);
-      onUpdateViewport(newX, newY, stage.scaleX());
+      // Don't call onUpdateViewport here to avoid heavy re-renders during panning
       return;
     }
 
@@ -295,7 +295,10 @@ interface CanvasProps {
   const handleMouseUp = (e: any) => {
     if (isPanning) {
       setIsPanning(false);
-      e.target.getStage().container().style.cursor = 'default';
+      const stage = e.target.getStage();
+      stage.container().style.cursor = 'default';
+      // Update parent state only when panning ends
+      onUpdateViewport(stage.x(), stage.y(), stage.scaleX());
     }
 
     if (selectionBox) {
@@ -624,12 +627,15 @@ interface CanvasProps {
         }}
       >
         <Layer>
-          {Array.from({ length: 100 }).map((_, i) => (
-            <Fragment key={i}>
-              <Line points={[i * 40, 0, i * 40, 3000]} stroke="#f0f0f0" strokeWidth={1} />
-              <Line points={[0, i * 40, 4000, i * 40]} stroke="#f0f0f0" strokeWidth={1} />
-            </Fragment>
-          ))}
+          {/* Grid - optimized rendering */}
+          <Group listening={false}>
+            {Array.from({ length: 40 }).map((_, i) => (
+              <Fragment key={i}>
+                <Line points={[i * 100, -1000, i * 100, 3000]} stroke="#f1f5f9" strokeWidth={1} />
+                <Line points={[-1000, i * 100, 4000, i * 100]} stroke="#f1f5f9" strokeWidth={1} />
+              </Fragment>
+            ))}
+          </Group>
 
           {layout.elements.map(el => renderElement(el))}
 
@@ -661,7 +667,7 @@ interface CanvasProps {
       </Stage>
     </div>
   );
-};
+});
 
 // --- Main App Component ---
 
@@ -711,11 +717,16 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
   
+  // Save to localStorage with debounce to prevent lag during rapid updates (dragging/panning)
   useEffect(() => {
-    const updatedModels = { ...models, [currentModelName]: layout };
-    setModels(updatedModels);
-    localStorage.setItem('factory-models', JSON.stringify(updatedModels));
-    localStorage.setItem('current-model-name', currentModelName);
+    const timer = setTimeout(() => {
+      const updatedModels = { ...models, [currentModelName]: layout };
+      setModels(updatedModels);
+      localStorage.setItem('factory-models', JSON.stringify(updatedModels));
+      localStorage.setItem('current-model-name', currentModelName);
+    }, 1000); // Wait 1 second after last change to save
+    
+    return () => clearTimeout(timer);
   }, [layout, currentModelName]);
 
   const undo = () => {
