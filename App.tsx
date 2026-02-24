@@ -23,7 +23,9 @@ import {
   Copy,
   Pencil,
   Check,
-  User
+  User,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -122,17 +124,24 @@ interface CanvasProps {
 const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElements, onSelectElements, onUpdateViewport, selectedIds }) => {
   const stageRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [selectionBox, setSelectionBox] = useState<{ x1: number, y1: number, x2: number, y2: number } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
-  const [dimensions, setDimensions] = useState({ width: window.innerWidth - 400, height: window.innerHeight - 150 });
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
-    const handleResize = () => {
-      setDimensions({ width: window.innerWidth - 400, height: window.innerHeight - 150 });
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    if (!containerRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setDimensions({ width, height });
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -566,7 +575,7 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
   };
 
   return (
-    <div className="w-full h-full bg-white overflow-hidden border border-slate-300 rounded-xl shadow-lg cursor-grab active:cursor-grabbing relative">
+    <div ref={containerRef} className="w-full h-full bg-white overflow-hidden border border-slate-300 rounded-xl shadow-lg cursor-grab active:cursor-grabbing relative">
       <div className="absolute bottom-4 left-4 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-200 text-[10px] font-mono text-slate-600 z-20 pointer-events-none flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className="font-bold text-indigo-600">SCALE:</span>
@@ -667,6 +676,7 @@ export default function App() {
   const [tempAppName, setTempAppName] = useState('');
   
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   useEffect(() => {
     const updatedModels = { ...models, [currentModelName]: layout };
@@ -876,299 +886,322 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[#f8fafc] text-slate-900 font-sans overflow-hidden">
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
-        <div className="p-6 border-bottom border-slate-100">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="bg-indigo-600 p-2 rounded-lg">
-              <Factory className="text-white w-5 h-5" />
-            </div>
-            {isEditingAppName ? (
-              <input
-                autoFocus
-                type="text"
-                value={tempAppName}
-                onChange={(e) => setTempAppName(e.target.value)}
-                onBlur={saveAppName}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') saveAppName();
-                  if (e.key === 'Escape') setIsEditingAppName(false);
-                }}
-                className="font-bold text-xl tracking-tight w-full outline-none border-b-2 border-indigo-500 bg-transparent"
-              />
-            ) : (
-              <h1 
-                className="font-bold text-xl tracking-tight cursor-pointer hover:text-indigo-600 transition-colors"
-                onClick={() => {
-                  setTempAppName(appName);
-                  setIsEditingAppName(true);
-                }}
-                title="Nhấp để đổi tên"
-              >
-                {appName}
-              </h1>
-            )}
-          </div>
-          <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Thiết kế Layout</p>
-        </div>
-
-        <div className="px-4 py-2 border-b border-slate-100">
-          <div className="relative">
-            <button 
-              onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
-              className="w-full flex items-center justify-between p-2 text-sm font-semibold bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
-            >
-              <div className="flex items-center gap-2 overflow-hidden">
-                <FolderOpen className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-                <span className="truncate">{currentModelName}</span>
+      <AnimatePresence mode="wait">
+        {isSidebarOpen && (
+          <motion.aside 
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 256, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 overflow-hidden whitespace-nowrap"
+          >
+            <div className="w-64 flex flex-col h-full">
+              <div className="p-6 border-bottom border-slate-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="bg-indigo-600 p-2 rounded-lg">
+                    <Factory className="text-white w-5 h-5" />
+                  </div>
+                  {isEditingAppName ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={tempAppName}
+                      onChange={(e) => setTempAppName(e.target.value)}
+                      onBlur={saveAppName}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveAppName();
+                        if (e.key === 'Escape') setIsEditingAppName(false);
+                      }}
+                      className="font-bold text-xl tracking-tight w-full outline-none border-b-2 border-indigo-500 bg-transparent"
+                    />
+                  ) : (
+                    <h1 
+                      className="font-bold text-xl tracking-tight cursor-pointer hover:text-indigo-600 transition-colors"
+                      onClick={() => {
+                        setTempAppName(appName);
+                        setIsEditingAppName(true);
+                      }}
+                      title="Nhấp để đổi tên"
+                    >
+                      {appName}
+                    </h1>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Thiết kế Layout</p>
               </div>
-              <ChevronDown className={`w-4 h-4 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
-            </button>
 
-            <AnimatePresence>
-              {isModelMenuOpen && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-64 overflow-y-auto"
-                >
-                  <div className="p-2 space-y-1">
-                    {Object.keys(models).map(name => (
-                      <div key={name} className="flex items-center justify-between group px-2 py-1.5 rounded-lg hover:bg-slate-50">
-                        {editingModelName === name ? (
-                          <div className="flex-1 flex items-center gap-1">
-                            <input 
-                              autoFocus
-                              type="text"
-                              value={tempModelName}
-                              onChange={(e) => setTempModelName(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') renameModel(name, tempModelName);
-                                if (e.key === 'Escape') setEditingModelName(null);
-                              }}
-                              className="flex-1 text-xs p-1 rounded border border-indigo-300 outline-none"
-                            />
-                            <button 
-                              onClick={() => renameModel(name, tempModelName)}
-                              className="p-1 text-green-600 hover:bg-green-50 rounded"
-                            >
-                              <Check className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <button 
-                              onClick={() => loadModel(name)}
-                              className={`flex-1 text-left text-xs font-medium truncate ${currentModelName === name ? 'text-indigo-600' : 'text-slate-600'}`}
-                            >
-                              {name}
-                            </button>
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                              <button 
-                                onClick={() => {
-                                  setEditingModelName(name);
-                                  setTempModelName(name);
-                                }}
-                                className="p-1 text-slate-400 hover:text-indigo-600"
-                                title="Đổi tên"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                              <button 
-                                onClick={() => duplicateModel(name)}
-                                className="p-1 text-slate-400 hover:text-indigo-600"
-                                title="Nhân bản"
-                              >
-                                <Copy className="w-3 h-3" />
-                              </button>
-                              {Object.keys(models).length > 1 && (
-                                <button 
-                                  onClick={() => deleteModel(name)}
-                                  className="p-1 text-slate-400 hover:text-red-500"
-                                  title="Xóa"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
+              <div className="px-4 py-2 border-b border-slate-100">
+                <div className="relative">
+                  <button 
+                    onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
+                    className="w-full flex items-center justify-between p-2 text-sm font-semibold bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <FolderOpen className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                      <span className="truncate">{currentModelName}</span>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isModelMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  <AnimatePresence>
+                    {isModelMenuOpen && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-64 overflow-y-auto"
+                      >
+                        <div className="p-2 space-y-1">
+                          {Object.keys(models).map(name => (
+                            <div key={name} className="flex items-center justify-between group px-2 py-1.5 rounded-lg hover:bg-slate-50">
+                              {editingModelName === name ? (
+                                <div className="flex-1 flex items-center gap-1">
+                                  <input 
+                                    autoFocus
+                                    type="text"
+                                    value={tempModelName}
+                                    onChange={(e) => setTempModelName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') renameModel(name, tempModelName);
+                                      if (e.key === 'Escape') setEditingModelName(null);
+                                    }}
+                                    className="flex-1 text-xs p-1 rounded border border-indigo-300 outline-none"
+                                  />
+                                  <button 
+                                    onClick={() => renameModel(name, tempModelName)}
+                                    className="p-1 text-green-600 hover:bg-green-50 rounded"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <button 
+                                    onClick={() => loadModel(name)}
+                                    className={`flex-1 text-left text-xs font-medium truncate ${currentModelName === name ? 'text-indigo-600' : 'text-slate-600'}`}
+                                  >
+                                    {name}
+                                  </button>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                    <button 
+                                      onClick={() => {
+                                        setEditingModelName(name);
+                                        setTempModelName(name);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-indigo-600"
+                                      title="Đổi tên"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                      onClick={() => duplicateModel(name)}
+                                      className="p-1 text-slate-400 hover:text-indigo-600"
+                                      title="Nhân bản"
+                                    >
+                                      <Copy className="w-3 h-3" />
+                                    </button>
+                                    {Object.keys(models).length > 1 && (
+                                      <button 
+                                        onClick={() => deleteModel(name)}
+                                        className="p-1 text-slate-400 hover:text-red-500"
+                                        title="Xóa"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </>
                               )}
                             </div>
-                          </>
-                        )}
+                          ))}
+                        </div>
+                        <div className="p-2 border-t border-slate-100 bg-slate-50">
+                          <div className="flex gap-1">
+                            <input 
+                              type="text" 
+                              placeholder="Tên model mới..."
+                              value={newModelName}
+                              onChange={(e) => setNewModelName(e.target.value)}
+                              className="flex-1 text-[10px] p-1.5 rounded border border-slate-200 outline-none"
+                            />
+                            <button 
+                              onClick={saveNewModel}
+                              className="p-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                            >
+                              <FilePlus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+
+              <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
+                <section>
+                  <h2 className="text-xs font-semibold text-slate-400 uppercase mb-3 px-2">Thêm thiết bị</h2>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => addElement('machine')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
+                      <Cpu className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-[10px] font-medium">Thiết bị</span>
+                    </button>
+                    <button onClick={() => addElement('conveyor')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
+                      <ArrowRightLeft className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-[10px] font-medium">Băng tải</span>
+                    </button>
+                    <button onClick={() => addElement('area')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
+                      <Factory className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-[10px] font-medium">Khu vực</span>
+                    </button>
+                    <button onClick={() => addElement('label')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
+                      <Plus className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-[10px] font-medium">Ghi chú</span>
+                    </button>
+                    <button onClick={() => addElement('arrow')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
+                      <ArrowRightLeft className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-[10px] font-medium">Mũi tên</span>
+                    </button>
+                    <button onClick={() => addElement('worker')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
+                      <User className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
+                      <span className="text-[10px] font-medium">Công nhân</span>
+                    </button>
+                  </div>
+                </section>
+
+                {selectedElement && (
+                  <motion.section 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-slate-50 p-4 rounded-2xl border border-slate-200"
+                  >
+                    <div className="flex justify-between items-center mb-3">
+                      <h2 className="text-xs font-bold text-slate-700 uppercase">Cấu hình</h2>
+                      <button onClick={deleteElement} className="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[10px] text-slate-500 block mb-1">Tên thiết bị / Công nhân</label>
+                        <input 
+                          type="text" 
+                          value={selectedElement.name}
+                          onChange={(e) => updateElement(selectedElement.id, { name: e.target.value })}
+                          className="w-full text-sm p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
                       </div>
-                    ))}
-                  </div>
-                  <div className="p-2 border-t border-slate-100 bg-slate-50">
-                    <div className="flex gap-1">
-                      <input 
-                        type="text" 
-                        placeholder="Tên model mới..."
-                        value={newModelName}
-                        onChange={(e) => setNewModelName(e.target.value)}
-                        className="flex-1 text-[10px] p-1.5 rounded border border-slate-200 outline-none"
-                      />
-                      <button 
-                        onClick={saveNewModel}
-                        className="p-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                      >
-                        <FilePlus className="w-3 h-3" />
-                      </button>
+                      {selectedElement.type === 'worker' && (
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Công việc đảm nhận</label>
+                          <input 
+                            type="text" 
+                            value={selectedElement.task || ''}
+                            onChange={(e) => updateElement(selectedElement.id, { task: e.target.value })}
+                            className="w-full text-sm p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="Ví dụ: Kiểm tra chất lượng..."
+                          />
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Dài (mm)</label>
+                          <input 
+                            type="number" 
+                            value={Math.round(selectedElement.width * MM_PER_PX)}
+                            onChange={(e) => updateElement(selectedElement.id, { width: parseInt(e.target.value) / MM_PER_PX })}
+                            className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Rộng (mm)</label>
+                          <input 
+                            type="number" 
+                            value={Math.round(selectedElement.height * MM_PER_PX)}
+                            onChange={(e) => updateElement(selectedElement.id, { height: parseInt(e.target.value) / MM_PER_PX })}
+                            className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Cỡ chữ</label>
+                          <input 
+                            type="number" 
+                            value={selectedElement.fontSize || 10}
+                            onChange={(e) => updateElement(selectedElement.id, { fontSize: parseInt(e.target.value) })}
+                            className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Xoay (độ)</label>
+                          <div className="flex gap-1">
+                            <input 
+                              type="number" 
+                              value={selectedElement.rotation || 0}
+                              onChange={(e) => updateElement(selectedElement.id, { rotation: parseInt(e.target.value) })}
+                              className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
+                            />
+                            <button 
+                              onClick={() => updateElement(selectedElement.id, { rotation: ((selectedElement.rotation || 0) + 90) % 360 })}
+                              className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+                              title="Xoay 90°"
+                            >
+                              <RotateCw className="w-4 h-4 text-slate-600" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedElement.showCross}
+                            onChange={(e) => updateElement(selectedElement.id, { showCross: e.target.checked })}
+                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="text-[10px] text-slate-500">Ký hiệu X</span>
+                        </label>
+                      </div>
                     </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
-          <section>
-            <h2 className="text-xs font-semibold text-slate-400 uppercase mb-3 px-2">Thêm thiết bị</h2>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => addElement('machine')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
-                <Cpu className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
-                <span className="text-[10px] font-medium">Thiết bị</span>
-              </button>
-              <button onClick={() => addElement('conveyor')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
-                <ArrowRightLeft className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
-                <span className="text-[10px] font-medium">Băng tải</span>
-              </button>
-              <button onClick={() => addElement('area')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
-                <Factory className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
-                <span className="text-[10px] font-medium">Khu vực</span>
-              </button>
-              <button onClick={() => addElement('label')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
-                <Plus className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
-                <span className="text-[10px] font-medium">Ghi chú</span>
-              </button>
-              <button onClick={() => addElement('arrow')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
-                <ArrowRightLeft className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
-                <span className="text-[10px] font-medium">Mũi tên</span>
-              </button>
-              <button onClick={() => addElement('worker')} className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group">
-                <User className="w-6 h-6 text-slate-600 group-hover:text-indigo-600 mb-1" />
-                <span className="text-[10px] font-medium">Công nhân</span>
-              </button>
-            </div>
-          </section>
-
-          {selectedElement && (
-            <motion.section 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-slate-50 p-4 rounded-2xl border border-slate-200"
-            >
-              <div className="flex justify-between items-center mb-3">
-                <h2 className="text-xs font-bold text-slate-700 uppercase">Cấu hình</h2>
-                <button onClick={deleteElement} className="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1">Tên thiết bị / Công nhân</label>
-                  <input 
-                    type="text" 
-                    value={selectedElement.name}
-                    onChange={(e) => updateElement(selectedElement.id, { name: e.target.value })}
-                    className="w-full text-sm p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-                {selectedElement.type === 'worker' && (
-                  <div>
-                    <label className="text-[10px] text-slate-500 block mb-1">Công việc đảm nhận</label>
-                    <input 
-                      type="text" 
-                      value={selectedElement.task || ''}
-                      onChange={(e) => updateElement(selectedElement.id, { task: e.target.value })}
-                      className="w-full text-sm p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                      placeholder="Ví dụ: Kiểm tra chất lượng..."
-                    />
-                  </div>
+                  </motion.section>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-slate-500 block mb-1">Dài (mm)</label>
-                    <input 
-                      type="number" 
-                      value={Math.round(selectedElement.width * MM_PER_PX)}
-                      onChange={(e) => updateElement(selectedElement.id, { width: parseInt(e.target.value) / MM_PER_PX })}
-                      className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-500 block mb-1">Rộng (mm)</label>
-                    <input 
-                      type="number" 
-                      value={Math.round(selectedElement.height * MM_PER_PX)}
-                      onChange={(e) => updateElement(selectedElement.id, { height: parseInt(e.target.value) / MM_PER_PX })}
-                      className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-slate-500 block mb-1">Cỡ chữ</label>
-                    <input 
-                      type="number" 
-                      value={selectedElement.fontSize || 10}
-                      onChange={(e) => updateElement(selectedElement.id, { fontSize: parseInt(e.target.value) })}
-                      className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-500 block mb-1">Xoay (độ)</label>
-                    <div className="flex gap-1">
-                      <input 
-                        type="number" 
-                        value={selectedElement.rotation || 0}
-                        onChange={(e) => updateElement(selectedElement.id, { rotation: parseInt(e.target.value) })}
-                        className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
-                      />
-                      <button 
-                        onClick={() => updateElement(selectedElement.id, { rotation: ((selectedElement.rotation || 0) + 90) % 360 })}
-                        className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
-                        title="Xoay 90°"
-                      >
-                        <RotateCw className="w-4 h-4 text-slate-600" />
+                {selectedIds.length > 1 && (
+                  <motion.section 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-slate-50 p-4 rounded-2xl border border-slate-200"
+                  >
+                    <div className="flex justify-between items-center mb-3">
+                      <h2 className="text-xs font-bold text-slate-700 uppercase">Đã chọn {selectedIds.length} đối tượng</h2>
+                      <button onClick={deleteElement} className="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors">
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={selectedElement.showCross}
-                      onChange={(e) => updateElement(selectedElement.id, { showCross: e.target.checked })}
-                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="text-[10px] text-slate-500">Ký hiệu X</span>
-                  </label>
-                </div>
-              </div>
-            </motion.section>
-          )}
-          {selectedIds.length > 1 && (
-            <motion.section 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-slate-50 p-4 rounded-2xl border border-slate-200"
-            >
-              <div className="flex justify-between items-center mb-3">
-                <h2 className="text-xs font-bold text-slate-700 uppercase">Đã chọn {selectedIds.length} đối tượng</h2>
-                <button onClick={deleteElement} className="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-500 italic">Bạn có thể di chuyển hoặc xóa các đối tượng đã chọn cùng lúc.</p>
-            </motion.section>
-          )}
-        </nav>
-      </aside>
+                    <p className="text-[10px] text-slate-500 italic">Bạn có thể di chuyển hoặc xóa các đối tượng đã chọn cùng lúc.</p>
+                  </motion.section>
+                )}
+              </nav>
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
 
       <main className="flex-1 flex flex-col relative overflow-hidden">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-10">
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-600"
+              title={isSidebarOpen ? "Ẩn thanh công cụ" : "Hiện thanh công cụ"}
+            >
+              {isSidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
+            </button>
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+              Live Factory Mode
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button 
@@ -1177,12 +1210,6 @@ export default function App() {
               className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 rounded-lg transition-colors"
             >
               <ArrowRightLeft className="w-4 h-4 rotate-180" /> Hoàn tác (Ctrl+Z)
-            </button>
-            <button className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
-              <Save className="w-4 h-4" /> Lưu bản thảo
-            </button>
-            <button className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 rounded-lg transition-colors">
-              <Download className="w-4 h-4" /> Xuất Layout
             </button>
           </div>
         </header>
