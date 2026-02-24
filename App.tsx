@@ -361,6 +361,8 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
           id={el.id}
           x={el.x}
           y={el.y}
+          width={el.width}
+          height={el.height}
           draggable
           onDragMove={(e) => handleDragMove(el.id, e)}
           onDragEnd={(e) => handleDragEnd(el.id, e)}
@@ -368,12 +370,22 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
           onClick={(e) => handleElementClick(el.id, e)}
           rotation={el.rotation || 0}
         >
+          <Rect
+            width={el.width}
+            height={el.height}
+            fill="transparent"
+            stroke={isSelected ? "#3b82f6" : "transparent"}
+            strokeWidth={1}
+          />
           <Text
             text={el.name}
             fontSize={el.fontSize || 14}
             fontStyle="bold"
             fill="#000"
             align="center"
+            verticalAlign="middle"
+            width={el.width}
+            height={el.height}
           />
         </Group>
       );
@@ -381,32 +393,13 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
 
     if (el.type === 'arrow') {
       return (
-        <Arrow
-          key={el.id}
-          id={el.id}
-          points={[0, 0, el.width, el.height]}
-          x={el.x}
-          y={el.y}
-          stroke="#000"
-          fill="#000"
-          strokeWidth={2}
-          draggable
-          onDragMove={(e) => handleDragMove(el.id, e)}
-          onDragEnd={(e) => handleDragEnd(el.id, e)}
-          onTransformEnd={(e) => handleTransformEnd(el.id, e)}
-          onClick={(e) => handleElementClick(el.id, e)}
-          rotation={el.rotation || 0}
-        />
-      );
-    }
-
-    if (el.type === 'worker') {
-      return (
         <Group
           key={el.id}
           id={el.id}
           x={el.x}
           y={el.y}
+          width={el.width}
+          height={el.height}
           draggable
           onDragMove={(e) => handleDragMove(el.id, e)}
           onDragEnd={(e) => handleDragEnd(el.id, e)}
@@ -414,55 +407,97 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
           onClick={(e) => handleElementClick(el.id, e)}
           rotation={el.rotation || 0}
         >
+          <Arrow
+            points={[0, 0, el.width, el.height]}
+            stroke="#000"
+            fill="#000"
+            strokeWidth={2}
+          />
+        </Group>
+      );
+    }
+
+    if (el.type === 'worker') {
+      const headSize = el.height * 0.3;
+      const bodyWidth = el.width * 0.6;
+      const bodyHeight = el.height * 0.4;
+      const centerX = el.width / 2;
+
+      return (
+        <Group
+          key={el.id}
+          id={el.id}
+          x={el.x}
+          y={el.y}
+          width={el.width}
+          height={el.height}
+          draggable
+          onDragMove={(e) => handleDragMove(el.id, e)}
+          onDragEnd={(e) => handleDragEnd(el.id, e)}
+          onTransformEnd={(e) => handleTransformEnd(el.id, e)}
+          onClick={(e) => handleElementClick(el.id, e)}
+          rotation={el.rotation || 0}
+        >
+          {/* Invisible hit area */}
           <Rect
-            x={el.width / 2 - 8}
+            width={el.width}
+            height={el.height + 40}
+            fill="transparent"
+          />
+          
+          {/* Head */}
+          <Rect
+            x={centerX - headSize / 2}
             y={0}
-            width={16}
-            height={16}
+            width={headSize}
+            height={headSize}
             fill="#fbbf24"
-            cornerRadius={8}
+            cornerRadius={headSize / 2}
             stroke="#000"
             strokeWidth={1}
           />
+          {/* Body */}
           <Rect
-            x={el.width / 2 - 12}
-            y={16}
-            width={24}
-            height={20}
+            x={centerX - bodyWidth / 2}
+            y={headSize}
+            width={bodyWidth}
+            height={bodyHeight}
             fill="#3b82f6"
-            cornerRadius={4}
+            cornerRadius={bodyWidth * 0.1}
             stroke="#000"
             strokeWidth={1}
           />
+          {/* Arms */}
           <Line
-            points={[el.width / 2 - 12, 20, el.width / 2 - 20, 30]}
+            points={[centerX - bodyWidth / 2, headSize + bodyHeight * 0.2, centerX - bodyWidth * 0.8, headSize + bodyHeight * 0.8]}
             stroke="#000"
-            strokeWidth={2}
+            strokeWidth={Math.max(1, el.width * 0.05)}
           />
           <Line
-            points={[el.width / 2 + 12, 20, el.width / 2 + 20, 30]}
+            points={[centerX + bodyWidth / 2, headSize + bodyHeight * 0.2, centerX + bodyWidth * 0.8, headSize + bodyHeight * 0.8]}
             stroke="#000"
-            strokeWidth={2}
+            strokeWidth={Math.max(1, el.width * 0.05)}
+          />
+          {/* Legs */}
+          <Line
+            points={[centerX - bodyWidth * 0.2, headSize + bodyHeight, centerX - bodyWidth * 0.4, el.height]}
+            stroke="#000"
+            strokeWidth={Math.max(1, el.width * 0.05)}
           />
           <Line
-            points={[el.width / 2 - 6, 36, el.width / 2 - 10, 50]}
+            points={[centerX + bodyWidth * 0.2, headSize + bodyHeight, centerX + bodyWidth * 0.4, el.height]}
             stroke="#000"
-            strokeWidth={2}
-          />
-          <Line
-            points={[el.width / 2 + 6, 36, el.width / 2 + 10, 50]}
-            stroke="#000"
-            strokeWidth={2}
+            strokeWidth={Math.max(1, el.width * 0.05)}
           />
 
           <Text
             text={el.name}
             fontSize={el.fontSize || 10}
             fontStyle="bold"
-            width={el.width + 100}
-            x={-50}
+            width={el.width * 3}
+            x={-el.width}
             align="center"
-            y={55}
+            y={el.height + 5}
             fill="#000"
             listening={false}
           />
@@ -470,10 +505,10 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
             <Text
               text={`(${el.task})`}
               fontSize={(el.fontSize || 10) * 0.9}
-              width={el.width + 120}
-              x={-60}
+              width={el.width * 3}
+              x={-el.width}
               align="center"
-              y={55 + (el.fontSize || 10) + 2}
+              y={el.height + 5 + (el.fontSize || 10) + 2}
               fill="#475569"
               fontStyle="italic"
               listening={false}
@@ -489,6 +524,8 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
         id={el.id}
         x={el.x}
         y={el.y}
+        width={el.width}
+        height={el.height}
         draggable
         onDragMove={(e) => handleDragMove(el.id, e)}
         onDragEnd={(e) => handleDragEnd(el.id, e)}
