@@ -1238,32 +1238,27 @@ export default function App() {
       </AnimatePresence>
 
       <main className="flex-1 flex flex-col relative overflow-hidden">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-10">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-600"
-              title={isSidebarOpen ? "Ẩn thanh công cụ" : "Hiện thanh công cụ"}
-            >
-              {isSidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
-            </button>
-            <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              Live Factory Mode
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={undo}
-              disabled={history.length === 0}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 rounded-lg transition-colors"
-            >
-              <ArrowRightLeft className="w-4 h-4 rotate-180" /> Hoàn tác (Ctrl+Z)
-            </button>
-          </div>
-        </header>
+        {/* Floating Controls */}
+        <div className="absolute top-4 left-4 z-30 flex items-center gap-2">
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="p-2.5 bg-white hover:bg-slate-50 rounded-xl shadow-lg border border-slate-200 transition-all text-slate-600 active:scale-95"
+            title={isSidebarOpen ? "Ẩn thanh công cụ" : "Hiện thanh công cụ"}
+          >
+            {isSidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
+          </button>
+          
+          <button 
+            onClick={undo}
+            disabled={history.length === 0}
+            className="p-2.5 bg-white hover:bg-slate-50 rounded-xl shadow-lg border border-slate-200 transition-all text-slate-600 disabled:opacity-50 active:scale-95"
+            title="Hoàn tác (Ctrl+Z)"
+          >
+            <ArrowRightLeft className="w-5 h-5 rotate-180" />
+          </button>
+        </div>
 
-        <div className="flex-1 p-6 bg-slate-50 relative">
+        <div className="flex-1 bg-slate-50 relative">
           <Canvas 
             layout={layout} 
             onUpdateElement={updateElement} 
