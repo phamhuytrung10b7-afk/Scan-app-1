@@ -145,18 +145,19 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
   }, []);
 
   useEffect(() => {
-    if (selectedIds.length > 0 && transformerRef.current) {
+    if (selectedIds.length > 0 && transformerRef.current && stageRef.current) {
       const stage = stageRef.current;
       const selectedNodes = selectedIds.map(id => stage.findOne('#' + id)).filter(node => !!node);
       transformerRef.current.nodes(selectedNodes);
-      transformerRef.current.getLayer().batchDraw();
+      const layer = transformerRef.current.getLayer();
+      if (layer) layer.batchDraw();
     } else if (transformerRef.current) {
       transformerRef.current.nodes([]);
     }
   }, [selectedIds]);
 
   const handleDragMove = (id: string, e: any) => {
-    if (selectedIds.includes(id) && selectedIds.length > 1) {
+    if (selectedIds.includes(id) && selectedIds.length > 1 && stageRef.current) {
       const node = e.target;
       const originalEl = layout.elements.find(el => el.id === id);
       if (!originalEl) return;
@@ -200,9 +201,10 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
 
   const handleTransformEnd = (id: string, e: any) => {
     const node = e.target;
-    if (selectedIds.length > 1) {
+    if (selectedIds.length > 1 && stageRef.current) {
       onUpdateElements(selectedIds, (el) => {
         const n = stageRef.current.findOne('#' + el.id);
+        if (!n) return {};
         return {
           x: n.x(),
           y: n.y(),
@@ -213,8 +215,10 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
       });
       selectedIds.forEach(sid => {
         const n = stageRef.current.findOne('#' + sid);
-        n.scaleX(1);
-        n.scaleY(1);
+        if (n) {
+          n.scaleX(1);
+          n.scaleY(1);
+        }
       });
     } else {
       onUpdateElement(id, {
@@ -418,9 +422,14 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
     }
 
     if (el.type === 'worker') {
-      const headSize = el.height * 0.3;
-      const bodyWidth = el.width * 0.6;
-      const bodyHeight = el.height * 0.4;
+      const hasName = el.name && el.name.trim() !== '';
+      const hasTask = el.task && el.task.trim() !== '';
+      const isActive = hasName && hasTask;
+      
+      const workerColor = isActive ? '#22c55e' : '#94a3b8'; // Vibrant Green vs Slate Gray
+      const headSize = el.height * 0.35;
+      const bodyWidth = el.width * 0.8;
+      const bodyHeight = el.height * 0.55;
       const centerX = el.width / 2;
 
       return (
@@ -438,6 +447,21 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
           onClick={(e) => handleElementClick(el.id, e)}
           rotation={el.rotation || 0}
         >
+          {/* Glow effect for active state */}
+          {isActive && (
+            <Rect
+              x={centerX - bodyWidth * 0.6}
+              y={-5}
+              width={bodyWidth * 1.2}
+              height={el.height + 10}
+              fill="rgba(34, 197, 94, 0.15)"
+              cornerRadius={12}
+              shadowBlur={15}
+              shadowColor="#22c55e"
+              listening={false}
+            />
+          )}
+
           {/* Invisible hit area */}
           <Rect
             width={el.width}
@@ -445,75 +469,51 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
             fill="transparent"
           />
           
-          {/* Head */}
+          {/* Professional Silhouette - Head */}
           <Rect
             x={centerX - headSize / 2}
             y={0}
             width={headSize}
             height={headSize}
-            fill="#fbbf24"
+            fill={workerColor}
             cornerRadius={headSize / 2}
             stroke="#000"
-            strokeWidth={1}
+            strokeWidth={1.5}
           />
-          {/* Body */}
+          {/* Professional Silhouette - Shoulders/Body */}
           <Rect
             x={centerX - bodyWidth / 2}
-            y={headSize}
+            y={headSize + 2}
             width={bodyWidth}
             height={bodyHeight}
-            fill="#3b82f6"
-            cornerRadius={bodyWidth * 0.1}
+            fill={workerColor}
+            cornerRadius={bodyWidth * 0.2}
             stroke="#000"
-            strokeWidth={1}
-          />
-          {/* Arms */}
-          <Line
-            points={[centerX - bodyWidth / 2, headSize + bodyHeight * 0.2, centerX - bodyWidth * 0.8, headSize + bodyHeight * 0.8]}
-            stroke="#000"
-            strokeWidth={Math.max(1, el.width * 0.05)}
-          />
-          <Line
-            points={[centerX + bodyWidth / 2, headSize + bodyHeight * 0.2, centerX + bodyWidth * 0.8, headSize + bodyHeight * 0.8]}
-            stroke="#000"
-            strokeWidth={Math.max(1, el.width * 0.05)}
-          />
-          {/* Legs */}
-          <Line
-            points={[centerX - bodyWidth * 0.2, headSize + bodyHeight, centerX - bodyWidth * 0.4, el.height]}
-            stroke="#000"
-            strokeWidth={Math.max(1, el.width * 0.05)}
-          />
-          <Line
-            points={[centerX + bodyWidth * 0.2, headSize + bodyHeight, centerX + bodyWidth * 0.4, el.height]}
-            stroke="#000"
-            strokeWidth={Math.max(1, el.width * 0.05)}
+            strokeWidth={1.5}
           />
 
           <Text
-            text={el.name}
+            text={hasName ? el.name : 'Chưa có tên'}
             fontSize={el.fontSize || 10}
             fontStyle="bold"
             width={el.width * 3}
             x={-el.width}
             align="center"
             y={el.height + 5}
-            fill="#000"
+            fill={hasName ? "#000" : "#94a3b8"}
             listening={false}
           />
-          {el.task && (
-            <Text
-              text={`(${el.task})`}
-              fontSize={(el.fontSize || 10) * 0.9}
-              width={el.width * 3}
-              x={-el.width}
-              align="center"
-              y={el.height + 5 + (el.fontSize || 10) + 2}
-              fill="#475569"
-              fontStyle="italic"
-              listening={false}
-            />
-          )}
+          <Text
+            text={hasTask ? `(${el.task})` : '(Chưa phân công)'}
+            fontSize={(el.fontSize || 10) * 0.9}
+            width={el.width * 3}
+            x={-el.width}
+            align="center"
+            y={el.height + 5 + (el.fontSize || 10) + 2}
+            fill={hasTask ? "#475569" : "#cbd5e1"}
+            fontStyle="italic"
+            listening={false}
+          />
         </Group>
       );
     }
@@ -863,11 +863,11 @@ export default function App() {
       y: 100,
       width: type === 'conveyor' ? 400 : (type === 'worker' ? 40 : 100),
       height: type === 'conveyor' ? 40 : (type === 'worker' ? 40 : 100),
-      name: type === 'worker' ? 'Công nhân mới' : `Mới ${type}`,
+      name: type === 'worker' ? '' : `Mới ${type}`,
       status: 'active',
       color: colors[type],
       showCross: type === 'storage',
-      task: type === 'worker' ? 'Mô tả công việc' : undefined
+      task: type === 'worker' ? '' : undefined
     };
     
     updateLayoutWithHistory(prev => ({
@@ -1146,7 +1146,10 @@ export default function App() {
                           <input 
                             type="number" 
                             value={Math.round(selectedElement.width * MM_PER_PX)}
-                            onChange={(e) => updateElement(selectedElement.id, { width: parseInt(e.target.value) / MM_PER_PX })}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              if (!isNaN(val)) updateElement(selectedElement.id, { width: val / MM_PER_PX });
+                            }}
                             className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
                           />
                         </div>
@@ -1155,7 +1158,10 @@ export default function App() {
                           <input 
                             type="number" 
                             value={Math.round(selectedElement.height * MM_PER_PX)}
-                            onChange={(e) => updateElement(selectedElement.id, { height: parseInt(e.target.value) / MM_PER_PX })}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              if (!isNaN(val)) updateElement(selectedElement.id, { height: val / MM_PER_PX });
+                            }}
                             className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
                           />
                         </div>
@@ -1167,7 +1173,10 @@ export default function App() {
                           <input 
                             type="number" 
                             value={selectedElement.fontSize || 10}
-                            onChange={(e) => updateElement(selectedElement.id, { fontSize: parseInt(e.target.value) })}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              if (!isNaN(val)) updateElement(selectedElement.id, { fontSize: val });
+                            }}
                             className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
                           />
                         </div>
@@ -1177,7 +1186,10 @@ export default function App() {
                             <input 
                               type="number" 
                               value={selectedElement.rotation || 0}
-                              onChange={(e) => updateElement(selectedElement.id, { rotation: parseInt(e.target.value) })}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                if (!isNaN(val)) updateElement(selectedElement.id, { rotation: val });
+                              }}
                               className="w-full text-sm p-2 rounded-lg border border-slate-200 outline-none"
                             />
                             <button 
