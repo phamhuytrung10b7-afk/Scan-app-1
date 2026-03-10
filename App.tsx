@@ -1310,21 +1310,10 @@ export default function App() {
   const extractWorkersFromBOM = async (base64Data: string, isPdf: boolean, fileName: string) => {
     setIsExtractingBOM(true);
     try {
-      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-      
-      let prompt = "Đây là một tài liệu BOM (Bill of Materials) của nhà máy. Hãy trích xuất danh sách công nhân/người phụ trách từ tài liệu này. ";
-      prompt += "Với mỗi người, hãy tìm: số thứ tự (no/id), tên (name), công việc đảm nhận (task), và bậc/level kỹ năng (level - từ 0 đến 7). ";
-      prompt += "Nếu không tìm thấy level, hãy mặc định là 0. Trả về kết quả dưới dạng một mảng JSON các đối tượng có cấu trúc: { no: number, name: string, task: string, level: number }. ";
-      prompt += "Chỉ trả về JSON, không kèm theo văn bản giải thích nào khác.";
-
       const base64Content = base64Data.split(',')[1];
-      let contentPart: any;
-
-      if (isPdf) {
-        contentPart = { inlineData: { data: base64Content, mimeType: 'application/pdf' } };
-      } else {
-        // Handle Excel by parsing it to text/CSV first
-        // This avoids "Unsupported MIME type" errors from Gemini
+      
+      // --- LOCAL OFFLINE PARSING (For Excel/CSV) ---
+      if (!isPdf) {
         try {
           const binaryStr = atob(base64Content);
           const len = binaryStr.length;
@@ -1335,13 +1324,59 @@ export default function App() {
           const workbook = XLSX.read(bytes, { type: 'array' });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
-          const csvData = XLSX.utils.sheet_to_csv(worksheet);
-          
-          contentPart = { text: `Dưới đây là dữ liệu từ file Excel (CSV format):\n\n${csvData}\n\n${prompt}` };
-        } catch (excelError) {
-          console.error("Excel Parsing Error:", excelError);
-          throw new Error("Không thể đọc file Excel. Vui lòng thử lại hoặc chuyển sang định dạng PDF.");
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+          if (jsonData.length > 0) {
+            // Map common column names to our structure
+            const mappedWorkers = jsonData.map((row: any) => {
+              const keys = Object.keys(row);
+              const findVal = (patterns: string[]) => {
+                const key = keys.find(k => patterns.some(p => k.toLowerCase().includes(p.toLowerCase())));
+                return key ? row[key] : null;
+              };
+
+              return {
+                no: parseInt(findVal(['stt', 'no', 'id', 'số thứ tự']) || '0'),
+                name: String(findVal(['tên', 'name', 'họ tên']) || ''),
+                task: String(findVal(['công việc', 'task', 'vị trí', 'nhiệm vụ']) || ''),
+                level: parseInt(findVal(['bậc', 'level', 'kỹ năng']) || '0')
+              };
+            }).filter(w => w.name && w.name !== 'undefined' && w.name !== '');
+
+            if (mappedWorkers.length > 0) {
+              applyExtractedWorkers(mappedWorkers, fileName);
+              setIsExtractingBOM(false);
+              return; // Success with local parsing
+            }
+          }
+        } catch (localError) {
+          console.warn("Local parsing failed, falling back to AI:", localError);
         }
+      }
+
+      // --- AI PARSING (Fallback or for PDF) ---
+      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      
+      let prompt = "Đây là một tài liệu BOM (Bill of Materials) của nhà máy. Hãy trích xuất danh sách công nhân/người phụ trách từ tài liệu này. ";
+      prompt += "Với mỗi người, hãy tìm: số thứ tự (no/id), tên (name), công việc đảm nhận (task), và bậc/level kỹ năng (level - từ 0 đến 7). ";
+      prompt += "Nếu không tìm thấy level, hãy mặc định là 0. Trả về kết quả dưới dạng một mảng JSON các đối tượng có cấu trúc: { no: number, name: string, task: string, level: number }. ";
+      prompt += "Chỉ trả về JSON, không kèm theo văn bản giải thích nào khác.";
+
+      let contentPart: any;
+
+      if (isPdf) {
+        contentPart = { inlineData: { data: base64Content, mimeType: 'application/pdf' } };
+      } else {
+        // For Excel, we still send CSV to AI if local parsing wasn't enough
+        const binaryStr = atob(base64Content);
+        const len = binaryStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        const workbook = XLSX.read(bytes, { type: 'array' });
+        const csvData = XLSX.utils.sheet_to_csv(workbook.Sheets[workbook.SheetNames[0]]);
+        contentPart = { text: `Dưới đây là dữ liệu từ file Excel (CSV format):\n\n${csvData}\n\n${prompt}` };
       }
 
       const response = await genAI.models.generateContent({
@@ -1359,72 +1394,76 @@ export default function App() {
       const extractedText = response.text;
       if (extractedText) {
         const workers = JSON.parse(extractedText.trim());
-        if (Array.isArray(workers) && workers.length > 0) {
-          updateLayoutWithHistory(prev => {
-            const newElements = [...prev.elements];
-            let updatedCount = 0;
-            let addedCount = 0;
-
-            workers.forEach((w: any) => {
-              // Try to find existing worker by sequenceNumber first, then name
-              const existingIndex = newElements.findIndex(el => 
-                el.type === 'worker' && 
-                ((w.no && el.sequenceNumber === w.no) || 
-                 (el.name && el.name.toLowerCase() === w.name.toLowerCase()))
-              );
-
-              if (existingIndex !== -1) {
-                newElements[existingIndex] = {
-                  ...newElements[existingIndex],
-                  name: w.name || newElements[existingIndex].name,
-                  task: w.task || newElements[existingIndex].task,
-                  level: typeof w.level === 'number' ? w.level : newElements[existingIndex].level,
-                  sequenceNumber: w.no || newElements[existingIndex].sequenceNumber
-                };
-                updatedCount++;
-              } else {
-                // Add new worker at a position based on sequence number if it's a "fixed position"
-                // Grid layout: 5 workers per row
-                const row = Math.floor((w.no || (newElements.filter(e => e.type === 'worker').length + 1) - 1) / 5);
-                const col = (w.no || (newElements.filter(e => e.type === 'worker').length + 1) - 1) % 5;
-                
-                const newWorker: LayoutElement = {
-                  id: Math.random().toString(36).substr(2, 9),
-                  type: 'worker',
-                  x: 350 + (col * 60),
-                  y: 400 + (row * 80),
-                  width: 40,
-                  height: 40,
-                  name: w.name,
-                  task: w.task,
-                  level: w.level || 0,
-                  sequenceNumber: w.no,
-                  status: 'active',
-                  color: '#fbbf24'
-                };
-                newElements.push(newWorker);
-                addedCount++;
-              }
-            });
-
-            setChatMessages(prevMsgs => [...prevMsgs, {
-              role: 'model',
-              text: `✨ **Tự động trích xuất thành công!**\n\nTôi đã xử lý file \`${fileName}\` và tìm thấy ${workers.length} nhân sự:\n- Cập nhật: ${updatedCount} người\n- Thêm mới: ${addedCount} người\n\nCác thông tin về tên, công việc và bậc thợ đã được đồng bộ vào layout.`
-            }]);
-
-            return { ...prev, elements: newElements };
-          });
-        }
+        applyExtractedWorkers(workers, fileName);
       }
     } catch (error) {
       console.error("Extraction Error:", error);
       setChatMessages(prevMsgs => [...prevMsgs, {
         role: 'model',
-        text: "❌ **Lỗi trích xuất:** Không thể tự động trích xuất dữ liệu từ file này. Vui lòng kiểm tra lại định dạng file hoặc thử lại sau."
+        text: "❌ **Lỗi trích xuất:** Không thể tự động trích xuất dữ liệu. Nếu bạn đang offline, hãy đảm bảo file Excel có các cột tiêu đề rõ ràng (STT, Tên, Công việc)."
       }]);
     } finally {
       setIsExtractingBOM(false);
     }
+  };
+
+  const applyExtractedWorkers = (workers: any[], fileName: string) => {
+    if (!Array.isArray(workers) || workers.length === 0) return;
+    
+    updateLayoutWithHistory(prev => {
+      const newElements = [...prev.elements];
+      let updatedCount = 0;
+      let addedCount = 0;
+
+      workers.forEach((w: any) => {
+        // Try to find existing worker by sequenceNumber first, then name
+        const existingIndex = newElements.findIndex(el => 
+          el.type === 'worker' && 
+          ((w.no && el.sequenceNumber === w.no) || 
+           (el.name && el.name.toLowerCase() === w.name.toLowerCase()))
+        );
+
+        if (existingIndex !== -1) {
+          newElements[existingIndex] = {
+            ...newElements[existingIndex],
+            name: w.name || newElements[existingIndex].name,
+            task: w.task || newElements[existingIndex].task,
+            level: typeof w.level === 'number' ? w.level : newElements[existingIndex].level,
+            sequenceNumber: w.no || newElements[existingIndex].sequenceNumber
+          };
+          updatedCount++;
+        } else {
+          // Add new worker at a position based on sequence number if it's a "fixed position"
+          // Grid layout: 5 workers per row
+          const row = Math.floor((w.no || (newElements.filter(e => e.type === 'worker').length + 1) - 1) / 5);
+          const col = (w.no || (newElements.filter(e => e.type === 'worker').length + 1) - 1) % 5;
+          
+          const newWorker: LayoutElement = {
+            id: Math.random().toString(36).substr(2, 9),
+            type: 'worker',
+            x: 350 + (col * 60),
+            y: 400 + (row * 80),
+            width: 40,
+            height: 40,
+            name: w.name,
+            task: w.task,
+            level: w.level || 0,
+            sequenceNumber: w.no,
+            status: 'active',
+            color: '#fbbf24'
+          };
+          newElements.push(newWorker);
+          addedCount++;
+        }
+      });
+
+      setChatMessages(prevMsgs => [...prevMsgs, {
+        role: 'model',
+        text: `✨ **Đã đồng bộ dữ liệu BOM!**\n\nTôi đã xử lý file \`${fileName}\` và tìm thấy ${workers.length} nhân sự:\n- Cập nhật: ${updatedCount} người\n- Thêm mới: ${addedCount} người\n\nCác thông tin về tên, công việc và bậc thợ đã được đồng bộ vào layout.`
+      }]);
+
+      return { ...prev, elements: newElements };
+    });
   };
 
   const viewBOM = () => {
