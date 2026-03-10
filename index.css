@@ -1,1 +1,24 @@
 @import "tailwindcss";
+
+@theme {
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-ink: #141414;
+  --color-bg-technical: #E4E3E0;
+  --color-line: #141414;
+}
+
+.bom-table th, .bom-table td {
+  border: 1px solid #141414;
+}
+
+.bom-table th {
+  background-color: #f8fafc;
+  font-weight: 800;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.bom-table td {
+  padding: 8px;
+  vertical-align: middle;
+}

@@ -1,5 +1,5 @@
 {
   "name": "FactoryFlow AI",
-  "description": "Ứng dụng thiết kế và tối ưu hóa layout sản xuất thông minh tích hợp AI.",
+  "description": "Ứng dụng thiết kế layout sản xuất và quản lý danh mục vật tư (BOM) chuyên nghiệp.",
   "requestFramePermissions": []
 }
