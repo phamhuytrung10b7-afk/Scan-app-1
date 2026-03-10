@@ -29,12 +29,18 @@ import {
   X,
   FileText,
   Upload,
-  ExternalLink
+  ExternalLink,
+  MessageSquare,
+  Send,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { GoogleGenAI } from "@google/genai";
+import Markdown from 'react-markdown';
 
 // --- Types ---
 export type ElementType = 'machine' | 'workstation' | 'storage' | 'conveyor' | 'area' | 'label' | 'arrow' | 'worker';
@@ -79,6 +85,11 @@ export interface FactoryLayout {
     data: string; // Base64 string
     type?: 'excel' | 'pdf';
   };
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
 }
 
 // --- Constants ---
@@ -827,23 +838,16 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
 // --- Main App Component ---
 
 export default function App() {
-  const [models, setModels] = useState<Record<string, FactoryLayout>>(() => {
-    const saved = localStorage.getItem('factory-models');
-    return saved ? JSON.parse(saved) : { 'Mặc định': INITIAL_LAYOUT };
-  });
-  const [currentModelName, setCurrentModelName] = useState<string>(() => {
-    return localStorage.getItem('current-model-name') || 'Mặc định';
-  });
-  const [layout, setLayout] = useState<FactoryLayout>(() => {
-    return models[currentModelName] || INITIAL_LAYOUT;
-  });
+  const [models, setModels] = useState<Record<string, FactoryLayout>>({ 'Mặc định': INITIAL_LAYOUT });
+  const [currentModelName, setCurrentModelName] = useState<string>('Mặc định');
+  const [layout, setLayout] = useState<FactoryLayout>(INITIAL_LAYOUT);
   const [history, setHistory] = useState<FactoryLayout[]>([]);
   const [clipboard, setClipboard] = useState<LayoutElement[]>([]);
   const [newModelName, setNewModelName] = useState('');
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [editingModelName, setEditingModelName] = useState<string | null>(null);
   const [tempModelName, setTempModelName] = useState('');
-  const [appName, setAppName] = useState(() => localStorage.getItem('app-name') || 'FactoryFlow AI');
+  const [appName, setAppName] = useState('FactoryFlow AI');
   const [isEditingAppName, setIsEditingAppName] = useState(false);
   const [tempAppName, setTempAppName] = useState('');
   
@@ -852,12 +856,67 @@ export default function App() {
   const [isBOMModalOpen, setIsBOMModalOpen] = useState(false);
   const [bomData, setBomData] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
+  // AI Assistant State
+  const [isAIChatOpen, setIsAIChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [userInput, setUserInput] = useState('');
+  const [isAILoading, setIsAILoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Initial Load
   useEffect(() => {
-    const updatedModels = { ...models, [currentModelName]: layout };
-    setModels(updatedModels);
-    localStorage.setItem('factory-models', JSON.stringify(updatedModels));
-    localStorage.setItem('current-model-name', currentModelName);
+    const init = async () => {
+      try {
+        const res = await fetch('/api/layouts');
+        const data = await res.json();
+        if (data && data.length > 0) {
+          const loadedModels: Record<string, FactoryLayout> = {};
+          data.forEach((item: any) => {
+            loadedModels[item.name] = JSON.parse(item.data);
+          });
+          setModels(loadedModels);
+          
+          const lastModelName = localStorage.getItem('current-model-name');
+          if (lastModelName && loadedModels[lastModelName]) {
+            setCurrentModelName(lastModelName);
+            setLayout(loadedModels[lastModelName]);
+          } else {
+            const firstModelName = data[0].name;
+            setCurrentModelName(firstModelName);
+            setLayout(loadedModels[firstModelName]);
+          }
+        }
+
+        const appNameRes = await fetch('/api/settings/app-name');
+        const appNameData = await appNameRes.json();
+        if (appNameData.value) {
+          setAppName(appNameData.value);
+        }
+      } catch (error) {
+        console.error("Failed to load initial data:", error);
+      }
+    };
+    init();
+  }, []);
+  
+  // Auto-save
+  useEffect(() => {
+    const save = async () => {
+      try {
+        await fetch('/api/layouts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: currentModelName, data: layout })
+        });
+        localStorage.setItem('current-model-name', currentModelName);
+      } catch (error) {
+        console.error("Failed to auto-save:", error);
+      }
+    };
+    
+    const timeout = setTimeout(save, 1000);
+    return () => clearTimeout(timeout);
   }, [layout, currentModelName]);
 
   const undo = () => {
@@ -926,14 +985,22 @@ export default function App() {
     }
   };
 
-  const saveNewModel = () => {
+  const saveNewModel = async () => {
     if (!newModelName.trim()) return;
     const updatedModels = { ...models, [newModelName]: layout };
     setModels(updatedModels);
     setCurrentModelName(newModelName);
     setNewModelName('');
-    localStorage.setItem('factory-models', JSON.stringify(updatedModels));
-    localStorage.setItem('current-model-name', newModelName);
+    
+    try {
+      await fetch('/api/layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newModelName, data: layout })
+      });
+    } catch (error) {
+      console.error("Failed to save new model:", error);
+    }
   };
 
   const loadModel = (name: string) => {
@@ -942,7 +1009,7 @@ export default function App() {
     setIsModelMenuOpen(false);
   };
 
-  const deleteModel = (name: string) => {
+  const deleteModel = async (name: string) => {
     if (Object.keys(models).length <= 1) return;
     const { [name]: _, ...rest } = models;
     setModels(rest);
@@ -951,10 +1018,15 @@ export default function App() {
       setCurrentModelName(nextName);
       setLayout(rest[nextName]);
     }
-    localStorage.setItem('factory-models', JSON.stringify(rest));
+    
+    try {
+      await fetch(`/api/layouts/${name}`, { method: 'DELETE' });
+    } catch (error) {
+      console.error("Failed to delete model:", error);
+    }
   };
 
-  const duplicateModel = (name: string) => {
+  const duplicateModel = async (name: string) => {
     const baseName = `${name} (Copy)`;
     let newName = baseName;
     let counter = 1;
@@ -964,10 +1036,19 @@ export default function App() {
     }
     const updatedModels = { ...models, [newName]: models[name] };
     setModels(updatedModels);
-    localStorage.setItem('factory-models', JSON.stringify(updatedModels));
+
+    try {
+      await fetch('/api/layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName, data: models[name] })
+      });
+    } catch (error) {
+      console.error("Failed to duplicate model:", error);
+    }
   };
 
-  const renameModel = (oldName: string, newName: string) => {
+  const renameModel = async (oldName: string, newName: string) => {
     if (!newName.trim() || oldName === newName || models[newName]) {
       setEditingModelName(null);
       return;
@@ -979,7 +1060,17 @@ export default function App() {
       setCurrentModelName(newName);
     }
     setEditingModelName(null);
-    localStorage.setItem('factory-models', JSON.stringify(updatedModels));
+
+    try {
+      await fetch(`/api/layouts/${oldName}`, { method: 'DELETE' });
+      await fetch('/api/layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName, data: modelData })
+      });
+    } catch (error) {
+      console.error("Failed to rename model:", error);
+    }
   };
 
   const addElement = (type: ElementType) => {
@@ -1050,12 +1141,63 @@ export default function App() {
     setSelectedIds([]);
   };
 
-  const saveAppName = () => {
+  const saveAppName = async () => {
     if (tempAppName.trim()) {
       setAppName(tempAppName);
-      localStorage.setItem('app-name', tempAppName);
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'app-name', value: tempAppName })
+        });
+      } catch (error) {
+        console.error("Failed to save app name:", error);
+      }
     }
     setIsEditingAppName(false);
+  };
+
+  // AI Assistant Logic
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  const handleAISend = async () => {
+    if (!userInput.trim() || isAILoading) return;
+
+    const userMsg: ChatMessage = { role: 'user', text: userInput };
+    setChatMessages(prev => [...prev, userMsg]);
+    setUserInput('');
+    setIsAILoading(true);
+
+    try {
+      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const model = genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          ...chatMessages.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
+          { role: 'user', parts: [{ text: userInput }] }
+        ],
+        config: {
+          systemInstruction: `Bạn là chuyên gia tư vấn thiết kế layout nhà máy và quản lý BOM cho ứng dụng FactoryFlow AI. 
+          Dưới đây là thông tin về layout hiện tại:
+          - Số lượng thiết bị: ${layout.elements.length}
+          - Các loại thiết bị: ${Array.from(new Set(layout.elements.map(e => e.type))).join(', ')}
+          - BOM: ${layout.bom ? layout.bom.name : 'Chưa tải lên'}
+          
+          Hãy trả lời ngắn gọn, chuyên nghiệp và hữu ích. Sử dụng Markdown để định dạng.`,
+        }
+      });
+
+      const response = await model;
+      const modelMsg: ChatMessage = { role: 'model', text: response.text || "Xin lỗi, tôi không thể trả lời lúc này." };
+      setChatMessages(prev => [...prev, modelMsg]);
+    } catch (error) {
+      console.error("AI Error:", error);
+      setChatMessages(prev => [...prev, { role: 'model', text: "Đã xảy ra lỗi khi kết nối với AI Assistant." }]);
+    } finally {
+      setIsAILoading(false);
+    }
   };
 
   const handleBOMUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1575,31 +1717,145 @@ export default function App() {
           >
             <ArrowRightLeft className="w-5 h-5 rotate-180" />
           </button>
+
+          <button 
+            onClick={() => setIsAIChatOpen(!isAIChatOpen)}
+            className={`p-2.5 rounded-xl shadow-lg border transition-all active:scale-95 flex items-center gap-2 ${
+              isAIChatOpen ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+            title="AI Assistant"
+          >
+            <Sparkles className={`w-5 h-5 ${isAIChatOpen ? 'animate-pulse' : ''}`} />
+            <span className="text-xs font-bold pr-1">AI Assistant</span>
+          </button>
         </div>
 
-        <div className="flex-1 bg-slate-50 relative">
-          <Canvas 
-            layout={layout} 
-            onUpdateElement={updateElement} 
-            onUpdateElements={updateElements}
-            onSelectElements={setSelectedIds}
-            onUpdateViewport={updateViewport}
-            selectedIds={selectedIds}
-          />
+        <div className="flex-1 bg-slate-50 relative flex">
+          <div className="flex-1 relative">
+            <Canvas 
+              layout={layout} 
+              onUpdateElement={updateElement} 
+              onUpdateElements={updateElements}
+              onSelectElements={setSelectedIds}
+              onUpdateViewport={updateViewport}
+              selectedIds={selectedIds}
+            />
 
+            <AnimatePresence>
+              {!isSidebarOpen && selectedElement && selectedElement.type === 'worker' && (
+                <WorkerProfilePopup 
+                  element={selectedElement} 
+                  onClose={() => setSelectedIds([])} 
+                />
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* AI Chat Sidebar */}
           <AnimatePresence>
-            {!isSidebarOpen && selectedElement && selectedElement.type === 'worker' && (
-              <WorkerProfilePopup 
-                element={selectedElement} 
-                onClose={() => setSelectedIds([])} 
-              />
+            {isAIChatOpen && (
+              <motion.div
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 350, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                className="bg-white border-l border-slate-200 flex flex-col shadow-2xl overflow-hidden"
+              >
+                <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="bg-indigo-100 p-1.5 rounded-lg">
+                      <Sparkles className="w-4 h-4 text-indigo-600" />
+                    </div>
+                    <h3 className="font-black text-slate-800 text-sm tracking-tight">AI Assistant</h3>
+                  </div>
+                  <button 
+                    onClick={() => setIsAIChatOpen(false)}
+                    className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 transition-all"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {chatMessages.length === 0 && (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4">
+                      <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center">
+                        <MessageSquare className="w-8 h-8 text-indigo-200" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">Xin chào! Tôi có thể giúp gì cho bạn?</p>
+                        <p className="text-xs text-slate-400 mt-1">Hỏi tôi về cách tối ưu layout hoặc phân tích BOM của bạn.</p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 w-full">
+                        <button 
+                          onClick={() => setUserInput("Hãy phân tích layout hiện tại của tôi.")}
+                          className="text-[10px] p-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 text-slate-600 text-left transition-colors"
+                        >
+                          "Hãy phân tích layout hiện tại của tôi."
+                        </button>
+                        <button 
+                          onClick={() => setUserInput("Làm thế nào để tối ưu luồng sản xuất?")}
+                          className="text-[10px] p-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 text-slate-600 text-left transition-colors"
+                        >
+                          "Làm thế nào để tối ưu luồng sản xuất?"
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] p-3 rounded-2xl text-xs ${
+                        msg.role === 'user' 
+                          ? 'bg-indigo-600 text-white rounded-tr-none shadow-md shadow-indigo-100' 
+                          : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200'
+                      }`}>
+                        <div className="markdown-body">
+                          <Markdown>{msg.text}</Markdown>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {isAILoading && (
+                    <div className="flex justify-start">
+                      <div className="bg-slate-100 p-3 rounded-2xl rounded-tl-none border border-slate-200 flex items-center gap-2">
+                        <Loader2 className="w-3 h-3 animate-spin text-indigo-600" />
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AI đang suy nghĩ...</span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                <div className="p-4 border-t border-slate-100">
+                  <div className="relative">
+                    <textarea
+                      value={userInput}
+                      onChange={(e) => setUserInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleAISend();
+                        }
+                      }}
+                      placeholder="Nhập câu hỏi tại đây..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 pr-12 text-xs outline-none focus:border-indigo-500 transition-colors resize-none h-20"
+                    />
+                    <button 
+                      onClick={handleAISend}
+                      disabled={!userInput.trim() || isAILoading}
+                      className="absolute right-2 bottom-2 p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50 active:scale-95"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
             )}
           </AnimatePresence>
 
           {/* BOM Viewer Modal */}
           <AnimatePresence>
             {isBOMModalOpen && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-10">
+              <div className={`fixed inset-0 z-[100] flex items-center justify-center ${layout.bom?.type === 'pdf' ? 'p-0' : 'p-4 sm:p-10'}`}>
                 <motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -1611,23 +1867,23 @@ export default function App() {
                   initial={{ opacity: 0, scale: 0.95, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className="relative w-full h-full bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+                  className={`relative w-full h-full bg-white shadow-2xl flex flex-col overflow-hidden ${layout.bom?.type === 'pdf' ? 'rounded-none' : 'rounded-3xl'}`}
                 >
-                  <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                  <div className={`border-b border-slate-100 flex items-center justify-between bg-slate-50/50 ${layout.bom?.type === 'pdf' ? 'p-3' : 'p-6'}`}>
                     <div className="flex items-center gap-4">
-                      <div className="bg-indigo-100 p-3 rounded-2xl">
-                        <FileText className="w-6 h-6 text-indigo-600" />
+                      <div className={`${layout.bom?.type === 'pdf' ? 'p-1.5' : 'p-3'} bg-indigo-100 rounded-2xl`}>
+                        <FileText className={`${layout.bom?.type === 'pdf' ? 'w-4 h-4' : 'w-6 h-6'} text-indigo-600`} />
                       </div>
                       <div>
-                        <h2 className="text-xl font-black text-slate-800 tracking-tight">Danh mục vật tư (BOM)</h2>
-                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{layout.bom?.name}</p>
+                        <h2 className={`${layout.bom?.type === 'pdf' ? 'text-sm' : 'text-xl'} font-black text-slate-800 tracking-tight`}>Danh mục vật tư (BOM)</h2>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{layout.bom?.name}</p>
                       </div>
                     </div>
                     <button 
                       onClick={() => setIsBOMModalOpen(false)}
                       className="p-2 hover:bg-slate-200 rounded-xl text-slate-400 transition-all hover:text-slate-600 active:scale-90"
                     >
-                      <X className="w-6 h-6" />
+                      <X className={`${layout.bom?.type === 'pdf' ? 'w-5 h-5' : 'w-6 h-6'}`} />
                     </button>
                   </div>
                   
@@ -1720,8 +1976,8 @@ export default function App() {
                     )}
                   </div>
                   
-                  <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-                    {layout.bom?.type !== 'pdf' && (
+                  {layout.bom?.type !== 'pdf' && (
+                    <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
                       <button 
                         onClick={exportBOMToPDF}
                         className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-sm font-bold hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-100 flex items-center gap-2"
@@ -1729,14 +1985,14 @@ export default function App() {
                         <Download className="w-4 h-4" />
                         Xuất PDF
                       </button>
-                    )}
-                    <button 
-                      onClick={() => setIsBOMModalOpen(false)}
-                      className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
-                    >
-                      Đóng bảng BOM
-                    </button>
-                  </div>
+                      <button 
+                        onClick={() => setIsBOMModalOpen(false)}
+                        className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
+                      >
+                        Đóng bảng BOM
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               </div>
             )}
