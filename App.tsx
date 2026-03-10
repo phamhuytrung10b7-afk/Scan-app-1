@@ -1611,7 +1611,7 @@ export default function App() {
                   initial={{ opacity: 0, scale: 0.95, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className="relative w-full max-w-6xl max-h-full bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+                  className="relative w-full h-full bg-white rounded-3xl shadow-2xl flex flex-col overflow-hidden"
                 >
                   <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                     <div className="flex items-center gap-4">
@@ -1631,12 +1631,12 @@ export default function App() {
                     </button>
                   </div>
                   
-                  <div className="flex-1 overflow-auto p-6 bg-slate-50">
+                  <div className={`flex-1 overflow-auto bg-slate-50 ${layout.bom?.type === 'pdf' ? 'p-0' : 'p-6'}`}>
                     {layout.bom?.type === 'pdf' ? (
-                      <div className="w-full h-full min-h-[600px] rounded-xl overflow-hidden border border-slate-200 shadow-inner">
+                      <div className="w-full h-full overflow-hidden">
                         <iframe 
                           src={layout.bom.data} 
-                          className="w-full h-full" 
+                          className="w-full h-full border-none" 
                           title="BOM PDF Viewer"
                         />
                       </div>
