@@ -893,7 +893,7 @@ export default function App() {
   // Initial Load
   useEffect(() => {
     const init = async () => {
-      // 1. Try to load from localStorage first for instant recovery
+      // 1. Load from localStorage FIRST (Instant & Offline friendly)
       const localModels = localStorage.getItem('factory-models');
       const localCurrentName = localStorage.getItem('current-model-name');
       const localAppName = localStorage.getItem('factory-app-name');
@@ -912,36 +912,36 @@ export default function App() {
       }
       if (localAppName) setAppName(localAppName);
 
-      // 2. Then sync with server
+      // 2. Sync with server ONLY if available
       try {
-        const res = await fetch('/api/layouts');
-        const data = await res.json();
-        if (data && data.length > 0) {
-          const loadedModels: Record<string, FactoryLayout> = {};
-          data.forEach((item: any) => {
-            loadedModels[item.name] = JSON.parse(item.layout);
-          });
-          setModels(loadedModels);
-          
-          const lastModelName = localCurrentName || localStorage.getItem('current-model-name');
-          if (lastModelName && loadedModels[lastModelName]) {
-            setCurrentModelName(lastModelName);
-            setLayout(loadedModels[lastModelName]);
-          } else {
-            const firstModelName = data[0].name;
-            setCurrentModelName(firstModelName);
-            setLayout(loadedModels[firstModelName]);
+        const res = await fetch('/api/layouts', { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0) {
+            const loadedModels: Record<string, FactoryLayout> = { ...models }; // Merge with local
+            data.forEach((item: any) => {
+              loadedModels[item.name] = JSON.parse(item.layout);
+            });
+            setModels(loadedModels);
+            
+            // If server has more up-to-date data, use it
+            const lastModelName = localCurrentName || data[0].name;
+            if (loadedModels[lastModelName]) {
+              setCurrentModelName(lastModelName);
+              setLayout(loadedModels[lastModelName]);
+            }
           }
         }
 
-        const appNameRes = await fetch('/api/settings/app-name');
-        const appNameData = await appNameRes.json();
-        if (appNameData.value) {
-          setAppName(appNameData.value);
-          localStorage.setItem('factory-app-name', appNameData.value);
+        const appNameRes = await fetch('/api/settings/app-name', { signal: AbortSignal.timeout(2000) });
+        if (appNameRes.ok) {
+          const appNameData = await appNameRes.json();
+          if (appNameData.value) {
+            setAppName(appNameData.value);
+          }
         }
       } catch (error) {
-        console.error("Failed to load initial data from server:", error);
+        console.log("Running in standalone/offline mode (Server storage unavailable)");
       }
     };
     init();
@@ -1248,13 +1248,24 @@ export default function App() {
   const handleAISend = async () => {
     if (!userInput.trim() || isAILoading) return;
 
+    const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    
+    if (!apiKey) {
+      setChatMessages(prev => [...prev, 
+        { role: 'user', text: userInput },
+        { role: 'model', text: "⚠️ **Thiếu API Key:** Để sử dụng AI, bạn cần cấu hình `GEMINI_API_KEY` trong môi trường hoặc `VITE_GEMINI_API_KEY` trong file `.env`." }
+      ]);
+      setUserInput('');
+      return;
+    }
+
     const userMsg: ChatMessage = { role: 'user', text: userInput };
     setChatMessages(prev => [...prev, userMsg]);
     setUserInput('');
     setIsAILoading(true);
 
     try {
-      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const genAI = new GoogleGenAI({ apiKey });
       const model = genAI.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [
@@ -1313,6 +1324,7 @@ export default function App() {
       const base64Content = base64Data.split(',')[1];
       
       // --- LOCAL OFFLINE PARSING (For Excel/CSV) ---
+      // ... (giữ nguyên logic offline đã viết ở turn trước)
       if (!isPdf) {
         try {
           const binaryStr = atob(base64Content);
@@ -1355,7 +1367,14 @@ export default function App() {
       }
 
       // --- AI PARSING (Fallback or for PDF) ---
-      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        if (isPdf) throw new Error("Cần API Key để phân tích file PDF.");
+        setIsExtractingBOM(false);
+        return;
+      }
+
+      const genAI = new GoogleGenAI({ apiKey });
       
       let prompt = "Đây là một tài liệu BOM (Bill of Materials) của nhà máy. Hãy trích xuất danh sách công nhân/người phụ trách từ tài liệu này. ";
       prompt += "Với mỗi người, hãy tìm: số thứ tự (no/id), tên (name), công việc đảm nhận (task), và bậc/level kỹ năng (level - từ 0 đến 7). ";
