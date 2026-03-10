@@ -63,6 +63,7 @@ export interface LayoutElement {
   task?: string; // For workers
   level?: number; // For workers (0-7)
   operationTime?: string; // For workers (not shown on layout)
+  sequenceNumber?: number; // For workers (STT in BOM)
 }
 
 export interface Connection {
@@ -638,6 +639,30 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
             </Group>
           )}
 
+          {/* Sequence Number Badge */}
+          {el.sequenceNumber !== undefined && (
+            <Group x={centerX - headSize / 2 - 10} y={0}>
+              <Rect
+                width={16}
+                height={14}
+                fill="#1e293b"
+                stroke="#000"
+                strokeWidth={1}
+                cornerRadius={4}
+              />
+              <Text
+                text={el.sequenceNumber.toString()}
+                fontSize={8}
+                fontStyle="bold"
+                width={16}
+                height={14}
+                align="center"
+                verticalAlign="middle"
+                fill="#fff"
+              />
+            </Group>
+          )}
+
           <Text
             text={hasName ? el.name : 'Chưa có tên'}
             fontSize={el.fontSize || 10}
@@ -862,6 +887,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [userInput, setUserInput] = useState('');
   const [isAILoading, setIsAILoading] = useState(false);
+  const [isExtractingBOM, setIsExtractingBOM] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Initial Load
@@ -934,10 +960,29 @@ export default function App() {
     const save = async () => {
       // Save to LocalStorage immediately
       localStorage.setItem('current-model-name', currentModelName);
-      localStorage.setItem('factory-models', JSON.stringify({
-        ...models,
-        [currentModelName]: layout
-      }));
+      
+      // Sanitize models for localStorage to avoid quota exceeded error
+      // We remove the large base64 BOM data from localStorage
+      const sanitizeLayout = (l: FactoryLayout) => {
+        if (!l.bom) return l;
+        return {
+          ...l,
+          bom: { ...l.bom, data: '' } // Clear large base64 data for local storage
+        };
+      };
+
+      const sanitizedModels: Record<string, FactoryLayout> = {};
+      Object.keys(models).forEach(key => {
+        sanitizedModels[key] = sanitizeLayout(models[key]);
+      });
+      sanitizedModels[currentModelName] = sanitizeLayout(layout);
+
+      try {
+        localStorage.setItem('factory-models', JSON.stringify(sanitizedModels));
+      } catch (e) {
+        console.warn("LocalStorage quota exceeded, even after sanitization", e);
+      }
+      
       localStorage.setItem('factory-app-name', appName);
 
       // Save to Server
@@ -1243,7 +1288,7 @@ export default function App() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const base64 = event.target?.result as string;
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
       
@@ -1255,8 +1300,131 @@ export default function App() {
           type: isPdf ? 'pdf' : 'excel'
         }
       }));
+
+      // Start automatic extraction
+      extractWorkersFromBOM(base64, isPdf, file.name);
     };
     reader.readAsDataURL(file);
+  };
+
+  const extractWorkersFromBOM = async (base64Data: string, isPdf: boolean, fileName: string) => {
+    setIsExtractingBOM(true);
+    try {
+      const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+      
+      let prompt = "Đây là một tài liệu BOM (Bill of Materials) của nhà máy. Hãy trích xuất danh sách công nhân/người phụ trách từ tài liệu này. ";
+      prompt += "Với mỗi người, hãy tìm: số thứ tự (no/id), tên (name), công việc đảm nhận (task), và bậc/level kỹ năng (level - từ 0 đến 7). ";
+      prompt += "Nếu không tìm thấy level, hãy mặc định là 0. Trả về kết quả dưới dạng một mảng JSON các đối tượng có cấu trúc: { no: number, name: string, task: string, level: number }. ";
+      prompt += "Chỉ trả về JSON, không kèm theo văn bản giải thích nào khác.";
+
+      const base64Content = base64Data.split(',')[1];
+      let contentPart: any;
+
+      if (isPdf) {
+        contentPart = { inlineData: { data: base64Content, mimeType: 'application/pdf' } };
+      } else {
+        // Handle Excel by parsing it to text/CSV first
+        // This avoids "Unsupported MIME type" errors from Gemini
+        try {
+          const binaryStr = atob(base64Content);
+          const len = binaryStr.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          const workbook = XLSX.read(bytes, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const csvData = XLSX.utils.sheet_to_csv(worksheet);
+          
+          contentPart = { text: `Dưới đây là dữ liệu từ file Excel (CSV format):\n\n${csvData}\n\n${prompt}` };
+        } catch (excelError) {
+          console.error("Excel Parsing Error:", excelError);
+          throw new Error("Không thể đọc file Excel. Vui lòng thử lại hoặc chuyển sang định dạng PDF.");
+        }
+      }
+
+      const response = await genAI.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          {
+            parts: isPdf ? [contentPart, { text: prompt }] : [contentPart]
+          }
+        ],
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      const extractedText = response.text;
+      if (extractedText) {
+        const workers = JSON.parse(extractedText.trim());
+        if (Array.isArray(workers) && workers.length > 0) {
+          updateLayoutWithHistory(prev => {
+            const newElements = [...prev.elements];
+            let updatedCount = 0;
+            let addedCount = 0;
+
+            workers.forEach((w: any) => {
+              // Try to find existing worker by sequenceNumber first, then name
+              const existingIndex = newElements.findIndex(el => 
+                el.type === 'worker' && 
+                ((w.no && el.sequenceNumber === w.no) || 
+                 (el.name && el.name.toLowerCase() === w.name.toLowerCase()))
+              );
+
+              if (existingIndex !== -1) {
+                newElements[existingIndex] = {
+                  ...newElements[existingIndex],
+                  name: w.name || newElements[existingIndex].name,
+                  task: w.task || newElements[existingIndex].task,
+                  level: typeof w.level === 'number' ? w.level : newElements[existingIndex].level,
+                  sequenceNumber: w.no || newElements[existingIndex].sequenceNumber
+                };
+                updatedCount++;
+              } else {
+                // Add new worker at a position based on sequence number if it's a "fixed position"
+                // Grid layout: 5 workers per row
+                const row = Math.floor((w.no || (newElements.filter(e => e.type === 'worker').length + 1) - 1) / 5);
+                const col = (w.no || (newElements.filter(e => e.type === 'worker').length + 1) - 1) % 5;
+                
+                const newWorker: LayoutElement = {
+                  id: Math.random().toString(36).substr(2, 9),
+                  type: 'worker',
+                  x: 350 + (col * 60),
+                  y: 400 + (row * 80),
+                  width: 40,
+                  height: 40,
+                  name: w.name,
+                  task: w.task,
+                  level: w.level || 0,
+                  sequenceNumber: w.no,
+                  status: 'active',
+                  color: '#fbbf24'
+                };
+                newElements.push(newWorker);
+                addedCount++;
+              }
+            });
+
+            setChatMessages(prevMsgs => [...prevMsgs, {
+              role: 'model',
+              text: `✨ **Tự động trích xuất thành công!**\n\nTôi đã xử lý file \`${fileName}\` và tìm thấy ${workers.length} nhân sự:\n- Cập nhật: ${updatedCount} người\n- Thêm mới: ${addedCount} người\n\nCác thông tin về tên, công việc và bậc thợ đã được đồng bộ vào layout.`
+            }]);
+
+            return { ...prev, elements: newElements };
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Extraction Error:", error);
+      setChatMessages(prevMsgs => [...prevMsgs, {
+        role: 'model',
+        text: "❌ **Lỗi trích xuất:** Không thể tự động trích xuất dữ liệu từ file này. Vui lòng kiểm tra lại định dạng file hoặc thử lại sau."
+      }]);
+    } finally {
+      setIsExtractingBOM(false);
+    }
   };
 
   const viewBOM = () => {
@@ -1517,15 +1685,23 @@ export default function App() {
                     <div className="flex flex-col gap-2">
                       <button 
                         onClick={viewBOM}
-                        className="flex items-center gap-2 p-2.5 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100 transition-all border border-indigo-100 group"
+                        disabled={isExtractingBOM}
+                        className="flex items-center gap-2 p-2.5 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100 transition-all border border-indigo-100 group disabled:opacity-50"
                       >
-                        <FileText className="w-4 h-4 flex-shrink-0" />
-                        <span className="text-xs font-bold truncate flex-1 text-left">{layout.bom.name}</span>
-                        <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        {isExtractingBOM ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <FileText className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        <span className="text-xs font-bold truncate flex-1 text-left">
+                          {isExtractingBOM ? 'Đang trích xuất dữ liệu...' : layout.bom.name}
+                        </span>
+                        {!isExtractingBOM && <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />}
                       </button>
                       <button 
                         onClick={() => fileInputRef.current?.click()}
-                        className="text-[10px] text-slate-400 hover:text-indigo-600 font-bold flex items-center gap-1 px-1"
+                        disabled={isExtractingBOM}
+                        className="text-[10px] text-slate-400 hover:text-indigo-600 font-bold flex items-center gap-1 px-1 disabled:opacity-50"
                       >
                         <Upload className="w-3 h-3" /> Thay đổi file BOM
                       </button>
@@ -1593,6 +1769,18 @@ export default function App() {
                       </button>
                     </div>
                     <div className="space-y-3">
+                      {selectedElement.type === 'worker' && (
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1">Số thứ tự (BOM)</label>
+                          <input 
+                            type="number" 
+                            value={selectedElement.sequenceNumber || ''}
+                            onChange={(e) => updateElement(selectedElement.id, { sequenceNumber: parseInt(e.target.value) || undefined })}
+                            className="w-full text-sm p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="Ví dụ: 1, 2, 3..."
+                          />
+                        </div>
+                      )}
                       <div>
                         <label className="text-[10px] text-slate-500 block mb-1">Tên thiết bị / Công nhân</label>
                         <input 
