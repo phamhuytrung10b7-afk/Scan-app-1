@@ -867,6 +867,26 @@ export default function App() {
   // Initial Load
   useEffect(() => {
     const init = async () => {
+      // 1. Try to load from localStorage first for instant recovery
+      const localModels = localStorage.getItem('factory-models');
+      const localCurrentName = localStorage.getItem('current-model-name');
+      const localAppName = localStorage.getItem('factory-app-name');
+
+      if (localModels) {
+        try {
+          const parsed = JSON.parse(localModels);
+          setModels(parsed);
+          if (localCurrentName && parsed[localCurrentName]) {
+            setCurrentModelName(localCurrentName);
+            setLayout(parsed[localCurrentName]);
+          }
+        } catch (e) {
+          console.error("Failed to parse local models", e);
+        }
+      }
+      if (localAppName) setAppName(localAppName);
+
+      // 2. Then sync with server
       try {
         const res = await fetch('/api/layouts');
         const data = await res.json();
@@ -877,7 +897,7 @@ export default function App() {
           });
           setModels(loadedModels);
           
-          const lastModelName = localStorage.getItem('current-model-name');
+          const lastModelName = localCurrentName || localStorage.getItem('current-model-name');
           if (lastModelName && loadedModels[lastModelName]) {
             setCurrentModelName(lastModelName);
             setLayout(loadedModels[lastModelName]);
@@ -892,32 +912,49 @@ export default function App() {
         const appNameData = await appNameRes.json();
         if (appNameData.value) {
           setAppName(appNameData.value);
+          localStorage.setItem('factory-app-name', appNameData.value);
         }
       } catch (error) {
-        console.error("Failed to load initial data:", error);
+        console.error("Failed to load initial data from server:", error);
       }
     };
     init();
   }, []);
   
-  // Auto-save
+  // Update models record when current layout changes
+  useEffect(() => {
+    setModels(prev => ({
+      ...prev,
+      [currentModelName]: layout
+    }));
+  }, [layout, currentModelName]);
+
+  // Auto-save to Server and LocalStorage
   useEffect(() => {
     const save = async () => {
+      // Save to LocalStorage immediately
+      localStorage.setItem('current-model-name', currentModelName);
+      localStorage.setItem('factory-models', JSON.stringify({
+        ...models,
+        [currentModelName]: layout
+      }));
+      localStorage.setItem('factory-app-name', appName);
+
+      // Save to Server
       try {
         await fetch('/api/layouts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: currentModelName, layout: layout })
         });
-        localStorage.setItem('current-model-name', currentModelName);
       } catch (error) {
-        console.error("Failed to auto-save:", error);
+        console.error("Failed to auto-save to server:", error);
       }
     };
     
     const timeout = setTimeout(save, 1000);
     return () => clearTimeout(timeout);
-  }, [layout, currentModelName]);
+  }, [layout, currentModelName, models, appName]);
 
   const undo = () => {
     if (history.length === 0) return;
@@ -1144,6 +1181,7 @@ export default function App() {
   const saveAppName = async () => {
     if (tempAppName.trim()) {
       setAppName(tempAppName);
+      localStorage.setItem('factory-app-name', tempAppName);
       try {
         await fetch('/api/settings', {
           method: 'POST',
