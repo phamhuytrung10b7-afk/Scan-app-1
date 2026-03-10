@@ -153,10 +153,10 @@ const WorkerProfilePopup = ({ element, onClose }: { element: LayoutElement, onCl
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.9, y: 20, x: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
-      exit={{ opacity: 0, scale: 0.9, y: 20, x: 20 }}
-      className="absolute bottom-6 right-6 w-80 bg-white/95 backdrop-blur-md rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white p-6 z-50"
+      initial={{ opacity: 0, scale: 0.9, x: "-50%", y: "-40%" }}
+      animate={{ opacity: 1, scale: 1, x: "-50%", y: "-50%" }}
+      exit={{ opacity: 0, scale: 0.9, x: "-50%", y: "-40%" }}
+      className="absolute top-1/2 left-1/2 w-72 bg-white/95 backdrop-blur-md rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white p-6 z-50"
     >
       <div className="flex items-start justify-between mb-5">
         <div className="flex items-center gap-4">
@@ -873,7 +873,7 @@ export default function App() {
         if (data && data.length > 0) {
           const loadedModels: Record<string, FactoryLayout> = {};
           data.forEach((item: any) => {
-            loadedModels[item.name] = JSON.parse(item.data);
+            loadedModels[item.name] = JSON.parse(item.layout);
           });
           setModels(loadedModels);
           
@@ -907,7 +907,7 @@ export default function App() {
         await fetch('/api/layouts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: currentModelName, data: layout })
+          body: JSON.stringify({ name: currentModelName, layout: layout })
         });
         localStorage.setItem('current-model-name', currentModelName);
       } catch (error) {
@@ -996,7 +996,7 @@ export default function App() {
       await fetch('/api/layouts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newModelName, data: layout })
+        body: JSON.stringify({ name: newModelName, layout: layout })
       });
     } catch (error) {
       console.error("Failed to save new model:", error);
@@ -1041,7 +1041,7 @@ export default function App() {
       await fetch('/api/layouts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, data: models[name] })
+        body: JSON.stringify({ name: newName, layout: models[name] })
       });
     } catch (error) {
       console.error("Failed to duplicate model:", error);
@@ -1066,7 +1066,7 @@ export default function App() {
       await fetch('/api/layouts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, data: modelData })
+        body: JSON.stringify({ name: newName, layout: modelData })
       });
     } catch (error) {
       console.error("Failed to rename model:", error);

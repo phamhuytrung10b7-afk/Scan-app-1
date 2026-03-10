@@ -13,15 +13,10 @@ const db = new Database("factory.db");
 db.exec(`
   CREATE TABLE IF NOT EXISTS layouts (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
     data TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
-  
-  -- Clean up duplicates if any exist before creating unique index
-  DELETE FROM layouts WHERE rowid NOT IN (SELECT min(rowid) FROM layouts GROUP BY name);
-  
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_layouts_name ON layouts(name);
   
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
