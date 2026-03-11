@@ -33,10 +33,12 @@ import {
   MessageSquare,
   Send,
   Sparkles,
-  Loader2
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+import Papa from 'papaparse';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { GoogleGenAI } from "@google/genai";
@@ -64,6 +66,8 @@ export interface LayoutElement {
   level?: number; // For workers (0-7)
   operationTime?: string; // For workers (not shown on layout)
   sequenceNumber?: number; // For workers (STT in BOM)
+  analysisTime?: string; // Timestamp of when this element was last updated from BOM
+  isCTQ?: boolean; // Critical to Quality marker
 }
 
 export interface Connection {
@@ -149,7 +153,7 @@ const LEVEL_COLORS = [
 
 // --- Components ---
 
-const WorkerProfilePopup = ({ element, onClose }: { element: LayoutElement, onClose: () => void }) => {
+const WorkerProfilePopup = ({ element, onClose, onUpdate }: { element: LayoutElement, onClose: () => void, onUpdate: (id: string, updates: Partial<LayoutElement>) => void }) => {
   if (element.type !== 'worker') return null;
 
   return (
@@ -162,13 +166,18 @@ const WorkerProfilePopup = ({ element, onClose }: { element: LayoutElement, onCl
       <div className="flex items-start justify-between mb-5">
         <div className="flex items-center gap-4">
           <div 
-            className="w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg transform -rotate-3"
+            className="relative w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg transform -rotate-3"
             style={{ 
               backgroundColor: LEVEL_COLORS[element.level || 0],
               boxShadow: `0 8px 16px ${LEVEL_COLORS[element.level || 0]}44`
             }}
           >
             {element.level || 0}
+            {element.isCTQ && (
+              <div className="absolute -top-2 -right-2 bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full border-2 border-white font-black shadow-sm">
+                CTQ
+              </div>
+            )}
           </div>
           <div>
             <h3 className="font-black text-slate-800 text-xl leading-tight tracking-tight">
@@ -176,7 +185,7 @@ const WorkerProfilePopup = ({ element, onClose }: { element: LayoutElement, onCl
             </h3>
             <div className="flex items-center gap-1.5 mt-0.5">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Hồ sơ nhân sự</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Thông tin công đoạn</p>
             </div>
           </div>
         </div>
@@ -192,10 +201,10 @@ const WorkerProfilePopup = ({ element, onClose }: { element: LayoutElement, onCl
         <div className="bg-slate-50/50 rounded-2xl p-4 border border-slate-100">
           <div className="flex items-center gap-2 mb-1.5">
             <Cpu className="w-3 h-3 text-indigo-500" />
-            <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Công việc đảm nhận</p>
+            <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Người đảm nhận</p>
           </div>
           <p className="text-sm text-slate-700 font-bold leading-relaxed">
-            {element.task || <span className="text-slate-300 italic font-medium">Chưa phân công nhiệm vụ</span>}
+            {element.task || <span className="text-slate-300 italic font-medium">Chưa có người đảm nhận</span>}
           </p>
         </div>
 
@@ -219,7 +228,41 @@ const WorkerProfilePopup = ({ element, onClose }: { element: LayoutElement, onCl
             </p>
           </div>
         </div>
+
+        <button
+          onClick={() => onUpdate(element.id, { isCTQ: !element.isCTQ })}
+          className={`w-full p-4 rounded-2xl border-2 transition-all flex items-center justify-between group ${
+            element.isCTQ 
+              ? 'bg-red-50 border-red-200 text-red-700' 
+              : 'bg-slate-50 border-slate-100 text-slate-600 hover:border-slate-200'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-xl transition-colors ${element.isCTQ ? 'bg-red-500 text-white' : 'bg-slate-200 text-slate-500 group-hover:bg-slate-300'}`}>
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div className="text-left">
+              <p className="text-xs font-black uppercase tracking-wider">Công đoạn CTQ</p>
+              <p className="text-[10px] opacity-70">Đánh dấu công đoạn quan trọng chất lượng</p>
+            </div>
+          </div>
+          <div className={`w-10 h-6 rounded-full relative transition-colors ${element.isCTQ ? 'bg-red-500' : 'bg-slate-300'}`}>
+            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${element.isCTQ ? 'left-5' : 'left-1'}`} />
+          </div>
+        </button>
       </div>
+
+      {element.analysisTime && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <div className="flex items-center gap-2 mb-1">
+            <Check className="w-2.5 h-2.5 text-emerald-500" />
+            <p className="text-[9px] text-slate-400 uppercase font-black tracking-wider">Cập nhật từ BOM lúc</p>
+          </div>
+          <p className="text-[10px] text-slate-500 font-bold">
+            {element.analysisTime}
+          </p>
+        </div>
+      )}
       
       <div className="mt-6 flex gap-2">
         <button 
@@ -663,26 +706,42 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
             </Group>
           )}
 
+          {/* CTQ Badge */}
+          {el.isCTQ && (
+            <Group x={centerX - 12} y={-15}>
+              <Rect
+                width={24}
+                height={12}
+                fill="#ef4444"
+                stroke="#fff"
+                strokeWidth={1}
+                cornerRadius={4}
+                shadowBlur={2}
+                shadowColor="#000"
+                shadowOpacity={0.2}
+              />
+              <Text
+                text="CTQ"
+                fontSize={7}
+                fontStyle="bold"
+                width={24}
+                height={12}
+                align="center"
+                verticalAlign="middle"
+                fill="#fff"
+              />
+            </Group>
+          )}
+
           <Text
-            text={hasName ? el.name : 'Chưa có tên'}
+            text={el.name || 'Chưa đặt tên'}
             fontSize={el.fontSize || 10}
             fontStyle="bold"
             width={el.width * 3}
             x={-el.width}
             align="center"
             y={el.height + 5}
-            fill={hasName ? "#000" : "#94a3b8"}
-            listening={false}
-          />
-          <Text
-            text={hasTask ? `(${el.task})` : '(Chưa phân công)'}
-            fontSize={(el.fontSize || 10) * 0.9}
-            width={el.width * 3}
-            x={-el.width}
-            align="center"
-            y={el.height + 5 + (el.fontSize || 10) + 2}
-            fill={hasTask ? "#475569" : "#cbd5e1"}
-            fontStyle="italic"
+            fill={el.name ? "#000" : "#94a3b8"}
             listening={false}
           />
         </Group>
@@ -955,49 +1014,48 @@ export default function App() {
     }));
   }, [layout, currentModelName]);
 
+  const handleSaveLayout = async () => {
+    // Save to LocalStorage immediately
+    localStorage.setItem('current-model-name', currentModelName);
+    
+    // Sanitize models for localStorage to avoid quota exceeded error
+    const sanitizeLayout = (l: FactoryLayout) => {
+      if (!l.bom) return l;
+      return {
+        ...l,
+        bom: { ...l.bom, data: '' } // Clear large base64 data for local storage
+      };
+    };
+
+    const sanitizedModels: Record<string, FactoryLayout> = {};
+    Object.keys(models).forEach(key => {
+      sanitizedModels[key] = sanitizeLayout(models[key]);
+    });
+    sanitizedModels[currentModelName] = sanitizeLayout(layout);
+
+    try {
+      localStorage.setItem('factory-models', JSON.stringify(sanitizedModels));
+    } catch (e) {
+      console.warn("LocalStorage quota exceeded, even after sanitization", e);
+    }
+    
+    localStorage.setItem('factory-app-name', appName);
+
+    // Save to Server
+    try {
+      await fetch('/api/layouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: currentModelName, layout: layout })
+      });
+    } catch (error) {
+      console.error("Failed to auto-save to server:", error);
+    }
+  };
+
   // Auto-save to Server and LocalStorage
   useEffect(() => {
-    const save = async () => {
-      // Save to LocalStorage immediately
-      localStorage.setItem('current-model-name', currentModelName);
-      
-      // Sanitize models for localStorage to avoid quota exceeded error
-      // We remove the large base64 BOM data from localStorage
-      const sanitizeLayout = (l: FactoryLayout) => {
-        if (!l.bom) return l;
-        return {
-          ...l,
-          bom: { ...l.bom, data: '' } // Clear large base64 data for local storage
-        };
-      };
-
-      const sanitizedModels: Record<string, FactoryLayout> = {};
-      Object.keys(models).forEach(key => {
-        sanitizedModels[key] = sanitizeLayout(models[key]);
-      });
-      sanitizedModels[currentModelName] = sanitizeLayout(layout);
-
-      try {
-        localStorage.setItem('factory-models', JSON.stringify(sanitizedModels));
-      } catch (e) {
-        console.warn("LocalStorage quota exceeded, even after sanitization", e);
-      }
-      
-      localStorage.setItem('factory-app-name', appName);
-
-      // Save to Server
-      try {
-        await fetch('/api/layouts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: currentModelName, layout: layout })
-        });
-      } catch (error) {
-        console.error("Failed to auto-save to server:", error);
-      }
-    };
-    
-    const timeout = setTimeout(save, 1000);
+    const timeout = setTimeout(handleSaveLayout, 1000);
     return () => clearTimeout(timeout);
   }, [layout, currentModelName, models, appName]);
 
@@ -1248,22 +1306,68 @@ export default function App() {
   const handleAISend = async () => {
     if (!userInput.trim() || isAILoading) return;
 
+    const input = userInput.trim().toLowerCase();
+    const userMsg: ChatMessage = { role: 'user', text: userInput };
+    setChatMessages(prev => [...prev, userMsg]);
+    setUserInput('');
+
+    // --- LOCAL COMMAND PROCESSOR (No API Key Required) ---
+    if (input.includes('thêm') || input.includes('tạo')) {
+      if (input.includes('công nhân') || input.includes('thợ')) {
+        const nameMatch = userInput.match(/(?:thêm|tạo)\s+(?:công nhân|thợ)\s+(.+)/i);
+        const name = nameMatch ? nameMatch[1] : 'Công nhân mới';
+        
+        updateLayoutWithHistory(prev => ({
+          ...prev,
+          elements: [...prev.elements, {
+            id: `worker-${Date.now()}`,
+            type: 'worker',
+            x: 400, y: 400, width: 40, height: 40,
+            name, task: 'Chưa phân công', level: 0, status: 'active', color: '#fbbf24'
+          }]
+        }));
+        
+        setChatMessages(prev => [...prev, { role: 'model', text: `✅ Đã thêm công nhân **${name}** vào layout.` }]);
+        return;
+      }
+      if (input.includes('máy') || input.includes('thiết bị')) {
+        updateLayoutWithHistory(prev => ({
+          ...prev,
+          elements: [...prev.elements, {
+            id: `machine-${Date.now()}`,
+            type: 'machine',
+            x: 450, y: 450, width: 80, height: 60,
+            name: 'Máy mới', status: 'idle', color: '#94a3b8'
+          }]
+        }));
+        setChatMessages(prev => [...prev, { role: 'model', text: "✅ Đã thêm một thiết bị mới." }]);
+        return;
+      }
+    }
+
+    if (input.includes('xóa hết') || input.includes('dọn dẹp')) {
+      updateLayoutWithHistory(prev => ({ ...prev, elements: [] }));
+      setChatMessages(prev => [...prev, { role: 'model', text: "🗑️ Đã dọn dẹp toàn bộ layout." }]);
+      return;
+    }
+
+    if (input.includes('lưu')) {
+      handleSaveLayout();
+      setChatMessages(prev => [...prev, { role: 'model', text: "💾 Đã lưu layout hiện tại." }]);
+      return;
+    }
+
+    // --- AI FALLBACK (Requires API Key) ---
     const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
     
     if (!apiKey) {
       setChatMessages(prev => [...prev, 
-        { role: 'user', text: userInput },
-        { role: 'model', text: "⚠️ **Thiếu API Key:** Để sử dụng AI, bạn cần cấu hình `GEMINI_API_KEY` trong môi trường hoặc `VITE_GEMINI_API_KEY` trong file `.env`." }
+        { role: 'model', text: "💡 **Chế độ Ngoại tuyến:** Tôi đã xử lý lệnh của bạn cục bộ. Để sử dụng tư vấn chuyên sâu hơn từ AI, bạn mới cần cấu hình `API Key`." }
       ]);
-      setUserInput('');
       return;
     }
 
-    const userMsg: ChatMessage = { role: 'user', text: userInput };
-    setChatMessages(prev => [...prev, userMsg]);
-    setUserInput('');
     setIsAILoading(true);
-
     try {
       const genAI = new GoogleGenAI({ apiKey });
       const model = genAI.models.generateContent({
@@ -1274,6 +1378,11 @@ export default function App() {
         ],
         config: {
           systemInstruction: `Bạn là chuyên gia tư vấn thiết kế layout nhà máy và quản lý BOM cho ứng dụng FactoryFlow AI. 
+          Thuật ngữ sử dụng:
+          - "Tên công đoạn": Tên của máy móc hoặc bước sản xuất (hiển thị trên layout).
+          - "Người đảm nhận": Tên nhân viên phụ trách công đoạn đó.
+          - "CTQ (Critical to Quality)": Công đoạn quan trọng ảnh hưởng trực tiếp đến chất lượng sản phẩm.
+          
           Dưới đây là thông tin về layout hiện tại:
           - Số lượng thiết bị: ${layout.elements.length}
           - Các loại thiết bị: ${Array.from(new Set(layout.elements.map(e => e.type))).join(', ')}
@@ -1323,104 +1432,79 @@ export default function App() {
     try {
       const base64Content = base64Data.split(',')[1];
       
-      // --- LOCAL OFFLINE PARSING (For Excel/CSV) ---
-      // ... (giữ nguyên logic offline đã viết ở turn trước)
-      if (!isPdf) {
-        try {
-          const binaryStr = atob(base64Content);
-          const len = binaryStr.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-          }
-          const workbook = XLSX.read(bytes, { type: 'array' });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-          if (jsonData.length > 0) {
-            // Map common column names to our structure
-            const mappedWorkers = jsonData.map((row: any) => {
-              const keys = Object.keys(row);
-              const findVal = (patterns: string[]) => {
-                const key = keys.find(k => patterns.some(p => k.toLowerCase().includes(p.toLowerCase())));
-                return key ? row[key] : null;
-              };
-
-              return {
-                no: parseInt(findVal(['stt', 'no', 'id', 'số thứ tự']) || '0'),
-                name: String(findVal(['tên', 'name', 'họ tên']) || ''),
-                task: String(findVal(['công việc', 'task', 'vị trí', 'nhiệm vụ']) || ''),
-                level: parseInt(findVal(['bậc', 'level', 'kỹ năng']) || '0')
-              };
-            }).filter(w => w.name && w.name !== 'undefined' && w.name !== '');
-
-            if (mappedWorkers.length > 0) {
-              applyExtractedWorkers(mappedWorkers, fileName);
-              setIsExtractingBOM(false);
-              return; // Success with local parsing
-            }
-          }
-        } catch (localError) {
-          console.warn("Local parsing failed, falling back to AI:", localError);
-        }
-      }
-
-      // --- AI PARSING (Fallback or for PDF) ---
-      const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
-      if (!apiKey) {
-        if (isPdf) throw new Error("Cần API Key để phân tích file PDF.");
+      if (isPdf) {
+        setChatMessages(prev => [...prev, { 
+          role: 'model', 
+          text: "⚠️ **Lưu ý:** Hiện tại hệ thống chỉ hỗ trợ phân tích tự động ngoại tuyến cho file **Excel (.xlsx, .xls)** và **CSV**. Đối với file PDF, vui lòng sử dụng API Key để AI hỗ trợ đọc dữ liệu." 
+        }]);
         setIsExtractingBOM(false);
         return;
       }
 
-      const genAI = new GoogleGenAI({ apiKey });
-      
-      let prompt = "Đây là một tài liệu BOM (Bill of Materials) của nhà máy. Hãy trích xuất danh sách công nhân/người phụ trách từ tài liệu này. ";
-      prompt += "Với mỗi người, hãy tìm: số thứ tự (no/id), tên (name), công việc đảm nhận (task), và bậc/level kỹ năng (level - từ 0 đến 7). ";
-      prompt += "Nếu không tìm thấy level, hãy mặc định là 0. Trả về kết quả dưới dạng một mảng JSON các đối tượng có cấu trúc: { no: number, name: string, task: string, level: number }. ";
-      prompt += "Chỉ trả về JSON, không kèm theo văn bản giải thích nào khác.";
-
-      let contentPart: any;
-
-      if (isPdf) {
-        contentPart = { inlineData: { data: base64Content, mimeType: 'application/pdf' } };
-      } else {
-        // For Excel, we still send CSV to AI if local parsing wasn't enough
+      // --- LOCAL OFFLINE PARSING (Excel/CSV) ---
+      try {
         const binaryStr = atob(base64Content);
         const len = binaryStr.length;
         const bytes = new Uint8Array(len);
         for (let i = 0; i < len; i++) {
           bytes[i] = binaryStr.charCodeAt(i);
         }
-        const workbook = XLSX.read(bytes, { type: 'array' });
-        const csvData = XLSX.utils.sheet_to_csv(workbook.Sheets[workbook.SheetNames[0]]);
-        contentPart = { text: `Dưới đây là dữ liệu từ file Excel (CSV format):\n\n${csvData}\n\n${prompt}` };
-      }
 
-      const response = await genAI.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            parts: isPdf ? [contentPart, { text: prompt }] : [contentPart]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json"
+        let jsonData: any[] = [];
+
+        if (fileName.toLowerCase().endsWith('.csv')) {
+          const csvText = new TextDecoder().decode(bytes);
+          const results = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+          jsonData = results.data;
+        } else {
+          const workbook = XLSX.read(bytes, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          jsonData = XLSX.utils.sheet_to_json(worksheet);
         }
-      });
 
-      const extractedText = response.text;
-      if (extractedText) {
-        const workers = JSON.parse(extractedText.trim());
-        applyExtractedWorkers(workers, fileName);
+        if (jsonData.length > 0) {
+          const mappedWorkers = jsonData.map((row: any) => {
+            const keys = Object.keys(row);
+            const findVal = (patterns: string[]) => {
+              const key = keys.find(k => patterns.some(p => k.toLowerCase().includes(p.toLowerCase())));
+              return key ? row[key] : null;
+            };
+
+            return {
+              no: parseInt(findVal(['stt', 'no', 'id', 'số thứ tự', 'index']) || '0'),
+              name: String(findVal(['tên công đoạn', 'công đoạn', 'thiết bị', 'máy', 'process', 'operation', 'station', 'vị trí']) || ''),
+              task: String(findVal(['người đảm nhận', 'người', 'nhân viên', 'worker', 'name', 'person', 'họ tên', 'đảm nhận']) || ''),
+              level: parseInt(findVal(['bậc', 'level', 'kỹ năng', 'grade', 'rank']) || '0'),
+              operationTime: String(findVal(['thời gian', 'time', 'cycle', 'op time', 'thao tác']) || ''),
+              isCTQ: String(findVal(['ctq', 'quan trọng', 'critical', 'chất lượng']) || '').toLowerCase().includes('x') || 
+                     String(findVal(['ctq', 'quan trọng', 'critical', 'chất lượng']) || '').toLowerCase() === 'true' ||
+                     String(findVal(['ctq', 'quan trọng', 'critical', 'chất lượng']) || '').toLowerCase() === '1'
+            };
+          }).filter(w => w.name && w.name !== 'undefined' && w.name !== '' && w.name.length > 1);
+
+          if (mappedWorkers.length > 0) {
+            applyExtractedWorkers(mappedWorkers, fileName);
+            setChatMessages(prev => [...prev, { 
+              role: 'model', 
+              text: `📊 **Phân tích hoàn tất!** Tôi đã tìm thấy **${mappedWorkers.length}** nhân sự từ file \`${fileName}\` bằng bộ lọc dữ liệu cục bộ.` 
+            }]);
+          } else {
+            setChatMessages(prev => [...prev, { 
+              role: 'model', 
+              text: `❌ **Không tìm thấy dữ liệu:** Tôi đã đọc file \`${fileName}\` nhưng không nhận diện được các cột tên hoặc công việc. Vui lòng kiểm tra lại định dạng file.` 
+            }]);
+          }
+        }
+      } catch (localError) {
+        console.error("Local parsing error:", localError);
+        setChatMessages(prev => [...prev, { 
+          role: 'model', 
+          text: `❌ **Lỗi đọc file:** Đã xảy ra lỗi khi cố gắng phân tích file \`${fileName}\` cục bộ.` 
+        }]);
       }
     } catch (error) {
-      console.error("Extraction Error:", error);
-      setChatMessages(prevMsgs => [...prevMsgs, {
-        role: 'model',
-        text: "❌ **Lỗi trích xuất:** Không thể tự động trích xuất dữ liệu. Nếu bạn đang offline, hãy đảm bảo file Excel có các cột tiêu đề rõ ràng (STT, Tên, Công việc)."
-      }]);
+      console.error("BOM Extraction Error:", error);
     } finally {
       setIsExtractingBOM(false);
     }
@@ -1448,7 +1532,10 @@ export default function App() {
             name: w.name || newElements[existingIndex].name,
             task: w.task || newElements[existingIndex].task,
             level: typeof w.level === 'number' ? w.level : newElements[existingIndex].level,
-            sequenceNumber: w.no || newElements[existingIndex].sequenceNumber
+            sequenceNumber: w.no || newElements[existingIndex].sequenceNumber,
+            operationTime: w.operationTime || newElements[existingIndex].operationTime,
+            isCTQ: w.isCTQ !== undefined ? w.isCTQ : newElements[existingIndex].isCTQ,
+            analysisTime: new Date().toLocaleString('vi-VN')
           };
           updatedCount++;
         } else {
@@ -1468,6 +1555,9 @@ export default function App() {
             task: w.task,
             level: w.level || 0,
             sequenceNumber: w.no,
+            operationTime: w.operationTime,
+            isCTQ: w.isCTQ,
+            analysisTime: new Date().toLocaleString('vi-VN'),
             status: 'active',
             color: '#fbbf24'
           };
@@ -1478,7 +1568,7 @@ export default function App() {
 
       setChatMessages(prevMsgs => [...prevMsgs, {
         role: 'model',
-        text: `✨ **Đã đồng bộ dữ liệu BOM!**\n\nTôi đã xử lý file \`${fileName}\` và tìm thấy ${workers.length} nhân sự:\n- Cập nhật: ${updatedCount} người\n- Thêm mới: ${addedCount} người\n\nCác thông tin về tên, công việc và bậc thợ đã được đồng bộ vào layout.`
+        text: `✨ **Đã đồng bộ dữ liệu BOM!**\n\nTôi đã xử lý file \`${fileName}\` và tìm thấy ${workers.length} công đoạn:\n- Cập nhật: ${updatedCount} vị trí\n- Thêm mới: ${addedCount} vị trí\n\nCác thông tin về **tên công đoạn**, **người đảm nhận**, bậc thợ và thời gian thao tác đã được đồng bộ vào layout.`
       }]);
 
       return { ...prev, elements: newElements };
@@ -1840,7 +1930,7 @@ export default function App() {
                         </div>
                       )}
                       <div>
-                        <label className="text-[10px] text-slate-500 block mb-1">Tên thiết bị / Công nhân</label>
+                        <label className="text-[10px] text-slate-500 block mb-1">Tên công đoạn</label>
                         <input 
                           type="text" 
                           value={selectedElement.name}
@@ -1850,13 +1940,13 @@ export default function App() {
                       </div>
                       {selectedElement.type === 'worker' && (
                         <div>
-                          <label className="text-[10px] text-slate-500 block mb-1">Công việc đảm nhận</label>
+                          <label className="text-[10px] text-slate-500 block mb-1">Người đảm nhận</label>
                           <input 
                             type="text" 
                             value={selectedElement.task || ''}
                             onChange={(e) => updateElement(selectedElement.id, { task: e.target.value })}
                             className="w-full text-sm p-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="Ví dụ: Kiểm tra chất lượng..."
+                            placeholder="Ví dụ: Nguyễn Văn A..."
                           />
                         </div>
                       )}
@@ -2030,6 +2120,7 @@ export default function App() {
                 <WorkerProfilePopup 
                   element={selectedElement} 
                   onClose={() => setSelectedIds([])} 
+                  onUpdate={updateElement}
                 />
               )}
             </AnimatePresence>
