@@ -90,6 +90,10 @@ export interface FactoryLayout {
     data: string; // Base64 string
     type?: 'excel' | 'pdf';
   };
+  pdfBom?: {
+    name: string;
+    data: string; // Base64 string
+  };
 }
 
 export interface ChatMessage {
@@ -938,8 +942,10 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isBOMModalOpen, setIsBOMModalOpen] = useState(false);
+  const [isPdfBomModalOpen, setIsPdfBomModalOpen] = useState(false);
   const [bomData, setBomData] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfBomInputRef = useRef<HTMLInputElement>(null);
 
   // AI Assistant State
   const [isAIChatOpen, setIsAIChatOpen] = useState(false);
@@ -1427,6 +1433,37 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const handlePdfBomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: "❌ **Lỗi:** Vui lòng chỉ tải lên file định dạng **PDF** cho mục này." 
+      }]);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      updateLayoutWithHistory(prev => ({
+        ...prev,
+        pdfBom: {
+          name: file.name,
+          data: base64
+        }
+      }));
+      
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: `✅ **Đã tải lên file PDF:** \`${file.name}\`. Bạn có thể xem file này trong phần "BOM PDF (Xem)" ở thanh bên.` 
+      }]);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const extractWorkersFromBOM = async (base64Data: string, isPdf: boolean, fileName: string) => {
     setIsExtractingBOM(true);
     try {
@@ -1602,6 +1639,11 @@ export default function App() {
       console.error("Error reading BOM file:", error);
       alert("Không thể đọc file Excel. Vui lòng kiểm tra lại định dạng.");
     }
+  };
+
+  const viewPdfBom = () => {
+    if (!layout.pdfBom) return;
+    setIsPdfBomModalOpen(true);
   };
 
   const exportBOMToPDF = () => {
@@ -1868,6 +1910,52 @@ export default function App() {
                     ref={fileInputRef}
                     onChange={handleBOMUpload}
                     accept=".xlsx, .xls, .pdf"
+                    className="hidden"
+                  />
+                </div>
+
+                {/* PDF BOM Viewer Section */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">BOM PDF (Xem)</p>
+                    {layout.pdfBom && (
+                      <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-bold">Đã tải</span>
+                    )}
+                  </div>
+                  
+                  {layout.pdfBom ? (
+                    <div className="flex flex-col gap-2">
+                      <button 
+                        onClick={viewPdfBom}
+                        className="flex items-center gap-2 p-2.5 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 transition-all border border-blue-100 group"
+                      >
+                        <FileText className="w-4 h-4 flex-shrink-0" />
+                        <span className="text-xs font-bold truncate flex-1 text-left">
+                          {layout.pdfBom.name}
+                        </span>
+                        <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                      <button 
+                        onClick={() => pdfBomInputRef.current?.click()}
+                        className="text-[10px] text-slate-400 hover:text-blue-600 font-bold flex items-center gap-1 px-1"
+                      >
+                        <Upload className="w-3 h-3" /> Thay đổi file PDF
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => pdfBomInputRef.current?.click()}
+                      className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all group"
+                    >
+                      <Upload className="w-4 h-4 text-slate-400 group-hover:text-blue-500" />
+                      <span className="text-xs font-bold text-slate-500 group-hover:text-blue-600">Tải lên PDF BOM (Chỉ xem)</span>
+                    </button>
+                  )}
+                  <input 
+                    type="file" 
+                    ref={pdfBomInputRef}
+                    onChange={handlePdfBomUpload}
+                    accept=".pdf"
                     className="hidden"
                   />
                 </div>
@@ -2368,6 +2456,69 @@ export default function App() {
                       </button>
                     </div>
                   )}
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* PDF BOM Viewer Modal (Only View) */}
+          <AnimatePresence>
+            {isPdfBomModalOpen && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsPdfBomModalOpen(false)}
+                  className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+                />
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="relative w-full max-w-6xl h-full max-h-[90vh] bg-white rounded-[40px] shadow-2xl overflow-hidden flex flex-col border border-white"
+                >
+                  <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-10">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-black text-slate-800 tracking-tight">Xem file BOM PDF</h2>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{layout.pdfBom?.name}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setIsPdfBomModalOpen(false)}
+                      className="p-3 hover:bg-slate-100 rounded-2xl text-slate-400 transition-all hover:text-slate-600 active:scale-90"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
+                  
+                  <div className="flex-1 overflow-hidden bg-slate-100">
+                    {layout.pdfBom ? (
+                      <iframe 
+                        src={layout.pdfBom.data} 
+                        className="w-full h-full border-none" 
+                        title="PDF BOM Viewer"
+                      />
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
+                        <AlertCircle className="w-12 h-12 opacity-20" />
+                        <p className="font-bold">Không có file PDF để hiển thị</p>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="p-6 border-t border-slate-100 bg-white flex justify-end">
+                    <button 
+                      onClick={() => setIsPdfBomModalOpen(false)}
+                      className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
+                    >
+                      Đóng
+                    </button>
+                  </div>
                 </motion.div>
               </div>
             )}
