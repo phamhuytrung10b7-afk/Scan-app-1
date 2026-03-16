@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, Fragment } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { Stage, Layer, Rect, Text, Arrow, Group, Line, Transformer } from 'react-konva';
 import { 
   Factory, 
@@ -289,6 +289,365 @@ interface CanvasProps {
   selectedIds: string[];
 }
 
+const FactoryElement = React.memo(({ 
+  el, 
+  isSelected, 
+  onDragMove, 
+  onDragEnd, 
+  onTransformEnd, 
+  onClick 
+}: { 
+  el: LayoutElement, 
+  isSelected: boolean, 
+  onDragMove: (id: string, e: any) => void,
+  onDragEnd: (id: string, e: any) => void,
+  onTransformEnd: (id: string, e: any) => void,
+  onClick: (id: string, e: any) => void
+}) => {
+  if (el.type === 'label') {
+    return (
+      <Group
+        id={el.id}
+        x={el.x}
+        y={el.y}
+        width={el.width}
+        height={el.height}
+        draggable
+        onDragMove={(e) => onDragMove(el.id, e)}
+        onDragEnd={(e) => onDragEnd(el.id, e)}
+        onTransformEnd={(e) => onTransformEnd(el.id, e)}
+        onClick={(e) => onClick(el.id, e)}
+        rotation={el.rotation || 0}
+      >
+        <Rect
+          width={el.width}
+          height={el.height}
+          fill="transparent"
+          stroke={isSelected ? "#3b82f6" : "transparent"}
+          strokeWidth={1}
+          perfectDrawEnabled={false}
+        />
+        <Text
+          text={el.name}
+          fontSize={el.fontSize || 14}
+          fontStyle="bold"
+          fill="#000"
+          align="center"
+          verticalAlign="middle"
+          width={el.width}
+          height={el.height}
+          listening={false}
+        />
+      </Group>
+    );
+  }
+
+  if (el.type === 'arrow') {
+    return (
+      <Group
+        id={el.id}
+        x={el.x}
+        y={el.y}
+        width={el.width}
+        height={el.height}
+        draggable
+        onDragMove={(e) => onDragMove(el.id, e)}
+        onDragEnd={(e) => onDragEnd(el.id, e)}
+        onTransformEnd={(e) => onTransformEnd(el.id, e)}
+        onClick={(e) => onClick(el.id, e)}
+        rotation={el.rotation || 0}
+      >
+        <Arrow
+          points={[0, 0, el.width, el.height]}
+          stroke="#000"
+          fill="#000"
+          strokeWidth={2}
+          perfectDrawEnabled={false}
+        />
+      </Group>
+    );
+  }
+
+  if (el.type === 'worker') {
+    const hasName = el.name && el.name.trim() !== '';
+    const hasTask = el.task && el.task.trim() !== '';
+    const isActive = hasName && hasTask;
+    const level = el.level || 0;
+    
+    const workerColor = isActive ? LEVEL_COLORS[level] : '#94a3b8';
+    const headSize = el.height * 0.35;
+    const bodyWidth = el.width * 0.8;
+    const bodyHeight = el.height * 0.55;
+    const centerX = el.width / 2;
+
+    return (
+      <Group
+        id={el.id}
+        x={el.x}
+        y={el.y}
+        width={el.width}
+        height={el.height}
+        draggable
+        onDragMove={(e) => onDragMove(el.id, e)}
+        onDragEnd={(e) => onDragEnd(el.id, e)}
+        onTransformEnd={(e) => onTransformEnd(el.id, e)}
+        onClick={(e) => onClick(el.id, e)}
+        rotation={el.rotation || 0}
+      >
+        {/* Glow effect for active state */}
+        {isActive && (
+          <Rect
+            x={centerX - bodyWidth * 0.6}
+            y={-5}
+            width={bodyWidth * 1.2}
+            height={el.height + 10}
+            fill={workerColor}
+            opacity={0.15}
+            cornerRadius={12}
+            shadowBlur={15}
+            shadowColor={workerColor}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        )}
+
+        {/* Invisible hit area */}
+        <Rect
+          width={el.width}
+          height={el.height + 40}
+          fill="transparent"
+        />
+        
+        {/* Professional Silhouette - Head */}
+        <Rect
+          x={centerX - headSize / 2}
+          y={0}
+          width={headSize}
+          height={headSize}
+          fill={workerColor}
+          cornerRadius={headSize / 2}
+          stroke="#000"
+          strokeWidth={1.5}
+          perfectDrawEnabled={false}
+        />
+        {/* Professional Silhouette - Shoulders/Body */}
+        <Rect
+          x={centerX - bodyWidth / 2}
+          y={headSize + 2}
+          width={bodyWidth}
+          height={bodyHeight}
+          fill={workerColor}
+          cornerRadius={bodyWidth * 0.2}
+          stroke="#000"
+          strokeWidth={1.5}
+          perfectDrawEnabled={false}
+        />
+
+        {/* Level Badge */}
+        {isActive && (
+          <Group x={centerX + headSize / 2 - 8} y={-10} listening={false}>
+            <Rect
+              width={24}
+              height={24}
+              fill="#fff"
+              stroke="#000"
+              strokeWidth={1.5}
+              cornerRadius={12}
+              shadowBlur={2}
+              shadowColor="#000"
+              shadowOpacity={0.2}
+              perfectDrawEnabled={false}
+            />
+            <Text
+              text={level.toString()}
+              fontSize={14}
+              fontStyle="bold"
+              width={24}
+              height={24}
+              align="center"
+              verticalAlign="middle"
+              fill="#000"
+            />
+          </Group>
+        )}
+
+        {/* Sequence Number Badge */}
+        {el.sequenceNumber !== undefined && (
+          <Group x={centerX - headSize / 2 - 20} y={-10} listening={false}>
+            <Rect
+              width={28}
+              height={24}
+              fill="#1e293b"
+              stroke="#000"
+              strokeWidth={1.5}
+              cornerRadius={6}
+              shadowBlur={2}
+              shadowColor="#000"
+              shadowOpacity={0.2}
+              perfectDrawEnabled={false}
+            />
+            <Text
+              text={el.sequenceNumber.toString()}
+              fontSize={14}
+              fontStyle="bold"
+              width={28}
+              height={24}
+              align="center"
+              verticalAlign="middle"
+              fill="#fff"
+            />
+          </Group>
+        )}
+
+        {/* CTQ Badge */}
+        {el.isCTQ && (
+          <Group x={centerX - 20} y={-35} listening={false}>
+            <Rect
+              width={40}
+              height={20}
+              fill="#ef4444"
+              stroke="#fff"
+              strokeWidth={1.5}
+              cornerRadius={6}
+              shadowBlur={3}
+              shadowColor="#000"
+              shadowOpacity={0.3}
+              perfectDrawEnabled={false}
+            />
+            <Text
+              text="CTQ"
+              fontSize={12}
+              fontStyle="bold"
+              width={40}
+              height={20}
+              align="center"
+              verticalAlign="middle"
+              fill="#fff"
+            />
+          </Group>
+        )}
+
+        <Text
+          text={el.name || 'Chưa đặt tên'}
+          fontSize={el.fontSize || 10}
+          fontStyle="bold"
+          width={el.width * 3}
+          x={-el.width}
+          align="center"
+          y={el.height + 5}
+          fill={el.name ? "#000" : "#94a3b8"}
+          listening={false}
+        />
+      </Group>
+    );
+  }
+
+  return (
+    <Group
+      id={el.id}
+      x={el.x}
+      y={el.y}
+      width={el.width}
+      height={el.height}
+      draggable
+      onDragMove={(e) => onDragMove(el.id, e)}
+      onDragEnd={(e) => onDragEnd(el.id, e)}
+      onTransformEnd={(e) => onTransformEnd(el.id, e)}
+      onClick={(e) => onClick(el.id, e)}
+      rotation={el.rotation || 0}
+    >
+      <Rect
+        width={el.width}
+        height={el.height}
+        fill={el.type === 'area' ? 'transparent' : (el.type === 'conveyor' ? '#2d5a27' : el.color)}
+        stroke="#000"
+        strokeWidth={el.type === 'area' ? 2 : 1}
+        dash={el.type === 'area' ? [5, 5] : undefined}
+        shadowBlur={isSelected ? 5 : 0}
+        shadowColor="#3b82f6"
+        perfectDrawEnabled={false}
+      />
+
+      {el.showCross && (
+        <Group listening={false}>
+          <Line points={[0, 0, el.width, el.height]} stroke="#000" strokeWidth={1} perfectDrawEnabled={false} />
+          <Line points={[el.width, 0, 0, el.height]} stroke="#000" strokeWidth={1} perfectDrawEnabled={false} />
+        </Group>
+      )}
+
+      {el.type === 'conveyor' && (
+        <Group listening={false}>
+          {el.width >= el.height ? (
+            Array.from({ length: Math.floor(el.width / 40) }).map((_, i) => (
+              <Rect
+                key={i}
+                x={i * 40 + 5}
+                y={2}
+                width={30}
+                height={el.height - 4}
+                fill="#fff"
+                stroke="#000"
+                strokeWidth={1}
+                perfectDrawEnabled={false}
+              />
+            ))
+          ) : (
+            Array.from({ length: Math.floor(el.height / 40) }).map((_, i) => (
+              <Rect
+                key={i}
+                x={2}
+                y={i * 40 + 5}
+                width={el.width - 4}
+                height={30}
+                fill="#fff"
+                stroke="#000"
+                strokeWidth={1}
+                perfectDrawEnabled={false}
+              />
+            ))
+          )}
+        </Group>
+      )}
+
+      {el.type !== 'area' && (
+        <Text
+          text={el.name}
+          fontSize={el.fontSize || 10}
+          fontStyle="bold"
+          width={el.width}
+          align="center"
+          y={el.height / 2 - 5}
+          fill={el.type === 'conveyor' ? '#000' : (el.color === '#fff' ? '#000' : '#fff')}
+          listening={false}
+        />
+      )}
+
+      {el.type === 'area' && (
+        <Text
+          text={el.name}
+          fontSize={12}
+          fontStyle="bold"
+          x={5}
+          y={5}
+          fill="#000"
+          listening={false}
+        />
+      )}
+    </Group>
+  );
+});
+
+const Grid = React.memo(() => (
+  <Layer listening={false}>
+    {Array.from({ length: 100 }).map((_, i) => (
+      <Fragment key={i}>
+        <Line points={[i * 40, 0, i * 40, 3000]} stroke="#f0f0f0" strokeWidth={1} perfectDrawEnabled={false} />
+        <Line points={[0, i * 40, 4000, i * 40]} stroke="#f0f0f0" strokeWidth={1} perfectDrawEnabled={false} />
+      </Fragment>
+    ))}
+  </Layer>
+));
+
 const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElements, onSelectElements, onUpdateViewport, selectedIds }) => {
   const stageRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
@@ -523,327 +882,6 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
     }
   };
 
-  const renderElement = (el: LayoutElement) => {
-    const isSelected = selectedIds.includes(el.id);
-    
-    if (el.type === 'label') {
-      return (
-        <Group
-          key={el.id}
-          id={el.id}
-          x={el.x}
-          y={el.y}
-          width={el.width}
-          height={el.height}
-          draggable
-          onDragMove={(e) => handleDragMove(el.id, e)}
-          onDragEnd={(e) => handleDragEnd(el.id, e)}
-          onTransformEnd={(e) => handleTransformEnd(el.id, e)}
-          onClick={(e) => handleElementClick(el.id, e)}
-          rotation={el.rotation || 0}
-        >
-          <Rect
-            width={el.width}
-            height={el.height}
-            fill="transparent"
-            stroke={isSelected ? "#3b82f6" : "transparent"}
-            strokeWidth={1}
-          />
-          <Text
-            text={el.name}
-            fontSize={el.fontSize || 14}
-            fontStyle="bold"
-            fill="#000"
-            align="center"
-            verticalAlign="middle"
-            width={el.width}
-            height={el.height}
-          />
-        </Group>
-      );
-    }
-
-    if (el.type === 'arrow') {
-      return (
-        <Group
-          key={el.id}
-          id={el.id}
-          x={el.x}
-          y={el.y}
-          width={el.width}
-          height={el.height}
-          draggable
-          onDragMove={(e) => handleDragMove(el.id, e)}
-          onDragEnd={(e) => handleDragEnd(el.id, e)}
-          onTransformEnd={(e) => handleTransformEnd(el.id, e)}
-          onClick={(e) => handleElementClick(el.id, e)}
-          rotation={el.rotation || 0}
-        >
-          <Arrow
-            points={[0, 0, el.width, el.height]}
-            stroke="#000"
-            fill="#000"
-            strokeWidth={2}
-          />
-        </Group>
-      );
-    }
-
-    if (el.type === 'worker') {
-      const hasName = el.name && el.name.trim() !== '';
-      const hasTask = el.task && el.task.trim() !== '';
-      const isActive = hasName && hasTask;
-      const level = el.level || 0;
-      
-      const workerColor = isActive ? LEVEL_COLORS[level] : '#94a3b8';
-      const headSize = el.height * 0.35;
-      const bodyWidth = el.width * 0.8;
-      const bodyHeight = el.height * 0.55;
-      const centerX = el.width / 2;
-
-      return (
-        <Group
-          key={el.id}
-          id={el.id}
-          x={el.x}
-          y={el.y}
-          width={el.width}
-          height={el.height}
-          draggable
-          onDragMove={(e) => handleDragMove(el.id, e)}
-          onDragEnd={(e) => handleDragEnd(el.id, e)}
-          onTransformEnd={(e) => handleTransformEnd(el.id, e)}
-          onClick={(e) => handleElementClick(el.id, e)}
-          rotation={el.rotation || 0}
-        >
-          {/* Glow effect for active state */}
-          {isActive && (
-            <Rect
-              x={centerX - bodyWidth * 0.6}
-              y={-5}
-              width={bodyWidth * 1.2}
-              height={el.height + 10}
-              fill={workerColor}
-              opacity={0.15}
-              cornerRadius={12}
-              shadowBlur={15}
-              shadowColor={workerColor}
-              listening={false}
-            />
-          )}
-
-          {/* Invisible hit area */}
-          <Rect
-            width={el.width}
-            height={el.height + 40}
-            fill="transparent"
-          />
-          
-          {/* Professional Silhouette - Head */}
-          <Rect
-            x={centerX - headSize / 2}
-            y={0}
-            width={headSize}
-            height={headSize}
-            fill={workerColor}
-            cornerRadius={headSize / 2}
-            stroke="#000"
-            strokeWidth={1.5}
-          />
-          {/* Professional Silhouette - Shoulders/Body */}
-          <Rect
-            x={centerX - bodyWidth / 2}
-            y={headSize + 2}
-            width={bodyWidth}
-            height={bodyHeight}
-            fill={workerColor}
-            cornerRadius={bodyWidth * 0.2}
-            stroke="#000"
-            strokeWidth={1.5}
-          />
-
-          {/* Level Badge */}
-          {isActive && (
-            <Group x={centerX + headSize / 2 - 5} y={0}>
-              <Rect
-                width={14}
-                height={14}
-                fill="#fff"
-                stroke="#000"
-                strokeWidth={1}
-                cornerRadius={7}
-              />
-              <Text
-                text={level.toString()}
-                fontSize={9}
-                fontStyle="bold"
-                width={14}
-                height={14}
-                align="center"
-                verticalAlign="middle"
-                fill="#000"
-              />
-            </Group>
-          )}
-
-          {/* Sequence Number Badge */}
-          {el.sequenceNumber !== undefined && (
-            <Group x={centerX - headSize / 2 - 10} y={0}>
-              <Rect
-                width={16}
-                height={14}
-                fill="#1e293b"
-                stroke="#000"
-                strokeWidth={1}
-                cornerRadius={4}
-              />
-              <Text
-                text={el.sequenceNumber.toString()}
-                fontSize={8}
-                fontStyle="bold"
-                width={16}
-                height={14}
-                align="center"
-                verticalAlign="middle"
-                fill="#fff"
-              />
-            </Group>
-          )}
-
-          {/* CTQ Badge */}
-          {el.isCTQ && (
-            <Group x={centerX - 12} y={-15}>
-              <Rect
-                width={24}
-                height={12}
-                fill="#ef4444"
-                stroke="#fff"
-                strokeWidth={1}
-                cornerRadius={4}
-                shadowBlur={2}
-                shadowColor="#000"
-                shadowOpacity={0.2}
-              />
-              <Text
-                text="CTQ"
-                fontSize={7}
-                fontStyle="bold"
-                width={24}
-                height={12}
-                align="center"
-                verticalAlign="middle"
-                fill="#fff"
-              />
-            </Group>
-          )}
-
-          <Text
-            text={el.name || 'Chưa đặt tên'}
-            fontSize={el.fontSize || 10}
-            fontStyle="bold"
-            width={el.width * 3}
-            x={-el.width}
-            align="center"
-            y={el.height + 5}
-            fill={el.name ? "#000" : "#94a3b8"}
-            listening={false}
-          />
-        </Group>
-      );
-    }
-
-    return (
-      <Group
-        key={el.id}
-        id={el.id}
-        x={el.x}
-        y={el.y}
-        width={el.width}
-        height={el.height}
-        draggable
-        onDragMove={(e) => handleDragMove(el.id, e)}
-        onDragEnd={(e) => handleDragEnd(el.id, e)}
-        onTransformEnd={(e) => handleTransformEnd(el.id, e)}
-        onClick={(e) => handleElementClick(el.id, e)}
-        rotation={el.rotation || 0}
-      >
-        <Rect
-          width={el.width}
-          height={el.height}
-          fill={el.type === 'area' ? 'transparent' : (el.type === 'conveyor' ? '#2d5a27' : el.color)}
-          stroke="#000"
-          strokeWidth={el.type === 'area' ? 2 : 1}
-          dash={el.type === 'area' ? [5, 5] : undefined}
-          shadowBlur={isSelected ? 5 : 0}
-          shadowColor="#3b82f6"
-        />
-
-        {el.showCross && (
-          <Fragment>
-            <Line points={[0, 0, el.width, el.height]} stroke="#000" strokeWidth={1} />
-            <Line points={[el.width, 0, 0, el.height]} stroke="#000" strokeWidth={1} />
-          </Fragment>
-        )}
-
-        {el.type === 'conveyor' && (
-          <Fragment>
-            {el.width >= el.height ? (
-              Array.from({ length: Math.floor(el.width / 40) }).map((_, i) => (
-                <Rect
-                  key={i}
-                  x={i * 40 + 5}
-                  y={2}
-                  width={30}
-                  height={el.height - 4}
-                  fill="#fff"
-                  stroke="#000"
-                  strokeWidth={1}
-                />
-              ))
-            ) : (
-              Array.from({ length: Math.floor(el.height / 40) }).map((_, i) => (
-                <Rect
-                  key={i}
-                  x={2}
-                  y={i * 40 + 5}
-                  width={el.width - 4}
-                  height={30}
-                  fill="#fff"
-                  stroke="#000"
-                  strokeWidth={1}
-                />
-              ))
-            )}
-          </Fragment>
-        )}
-
-        {el.type !== 'area' && (
-          <Text
-            text={el.name}
-            fontSize={el.fontSize || 10}
-            fontStyle="bold"
-            width={el.width}
-            align="center"
-            y={el.height / 2 - 5}
-            fill={el.type === 'conveyor' ? '#000' : (el.color === '#fff' ? '#000' : '#fff')}
-            listening={false}
-          />
-        )}
-
-        {el.type === 'area' && (
-          <Text
-            text={el.name}
-            fontSize={12}
-            fontStyle="bold"
-            x={5}
-            y={5}
-            fill="#000"
-            listening={false}
-          />
-        )}
-      </Group>
-    );
-  };
 
   return (
     <div ref={containerRef} className="w-full h-full bg-white overflow-hidden border border-slate-300 rounded-xl shadow-lg cursor-grab active:cursor-grabbing relative">
@@ -883,15 +921,19 @@ const Canvas: React.FC<CanvasProps> = ({ layout, onUpdateElement, onUpdateElemen
           }
         }}
       >
+        <Grid />
         <Layer>
-          {Array.from({ length: 100 }).map((_, i) => (
-            <Fragment key={i}>
-              <Line points={[i * 40, 0, i * 40, 3000]} stroke="#f0f0f0" strokeWidth={1} />
-              <Line points={[0, i * 40, 4000, i * 40]} stroke="#f0f0f0" strokeWidth={1} />
-            </Fragment>
+          {layout.elements.map(el => (
+            <FactoryElement 
+              key={el.id}
+              el={el}
+              isSelected={selectedIds.includes(el.id)}
+              onDragMove={handleDragMove}
+              onDragEnd={handleDragEnd}
+              onTransformEnd={handleTransformEnd}
+              onClick={handleElementClick}
+            />
           ))}
-
-          {layout.elements.map(el => renderElement(el))}
 
           {selectionBox && (
             <Rect
@@ -1276,6 +1318,25 @@ export default function App() {
   const resetView = () => {
     updateViewport(0, 0, 1);
   };
+
+  const workerStats = useMemo(() => {
+    const stats = {
+      total: 0,
+      levels: Array(8).fill(0),
+      ctq: 0
+    };
+    layout.elements.forEach(el => {
+      if (el.type === 'worker') {
+        stats.total++;
+        const level = el.level || 0;
+        if (level >= 0 && level <= 7) {
+          stats.levels[level]++;
+        }
+        if (el.isCTQ) stats.ctq++;
+      }
+    });
+    return stats;
+  }, [layout.elements]);
 
   const deleteElement = () => {
     if (selectedIds.length === 0) return;
@@ -1962,6 +2023,45 @@ export default function App() {
               </div>
 
               <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
+                {/* Worker Stats Dashboard */}
+                <section className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <User className="w-3 h-3 text-indigo-600" />
+                      <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nhân sự Model</h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {workerStats.ctq > 0 && (
+                        <div className="bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black">
+                          CTQ: {workerStats.ctq}
+                        </div>
+                      )}
+                      <div className="bg-slate-900 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
+                        Tổng: {workerStats.total}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-3">
+                    {workerStats.levels.map((count, lvl) => (
+                      <div key={lvl} className="flex flex-col items-center gap-1 group">
+                        <div 
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black text-white shadow-sm transition-transform group-hover:scale-110"
+                          style={{ 
+                            backgroundColor: LEVEL_COLORS[lvl],
+                            boxShadow: count > 0 ? `0 4px 12px ${LEVEL_COLORS[lvl]}44` : 'none',
+                            opacity: count > 0 ? 1 : 0.3
+                          }}
+                        >
+                          {lvl}
+                        </div>
+                        <span className={`text-[10px] font-black ${count > 0 ? 'text-slate-800' : 'text-slate-300'}`}>
+                          {count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
                 <section>
                   <h2 className="text-xs font-semibold text-slate-400 uppercase mb-3 px-2">Thêm thiết bị</h2>
                   <div className="grid grid-cols-2 gap-2">
