@@ -43,10 +43,10 @@ import Papa from 'papaparse';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { GoogleGenAI } from "@google/genai";
-import SafePdfViewer from './src/components/SafePdfViewer';
+import SafePdfViewer from './SafePdfViewer';
 import Markdown from 'react-markdown';
-import { FactoryLayout, LayoutElement, Connection, ElementType, ChatMessage } from './src/types';
-import { BOMModal, PdfBomModal, GenericPdfModal, ImageModal } from './src/components/Modals';
+import { FactoryLayout, LayoutElement, Connection, ElementType, ChatMessage } from './types';
+import { BOMModal, PdfBomModal, GenericPdfModal, ImageModal } from './Modals';
 
 // --- Constants ---
 const INITIAL_LAYOUT: FactoryLayout = {
