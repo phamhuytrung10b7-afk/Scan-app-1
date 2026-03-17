@@ -34,7 +34,8 @@ import {
   Send,
   Sparkles,
   Loader2,
-  AlertTriangle
+  AlertTriangle,
+  Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -42,67 +43,15 @@ import Papa from 'papaparse';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { GoogleGenAI } from "@google/genai";
+import SafePdfViewer from './src/components/SafePdfViewer';
 import Markdown from 'react-markdown';
-
-// --- Types ---
-export type ElementType = 'machine' | 'workstation' | 'storage' | 'conveyor' | 'area' | 'label' | 'arrow' | 'worker';
-
-export interface LayoutElement {
-  id: string;
-  type: ElementType;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  name: string;
-  status: 'active' | 'maintenance' | 'idle';
-  capacity?: number;
-  color: string;
-  rotation?: number;
-  fontSize?: number;
-  showCross?: boolean; // For pallet areas
-  isVertical?: boolean;
-  task?: string; // For workers
-  level?: number; // For workers (0-7)
-  operationTime?: string; // For workers (not shown on layout)
-  sequenceNumber?: number; // For workers (STT in BOM)
-  analysisTime?: string; // Timestamp of when this element was last updated from BOM
-  isCTQ?: boolean; // Critical to Quality marker
-}
-
-export interface Connection {
-  id: string;
-  fromId: string;
-  toId: string;
-  type?: 'flow' | 'logic';
-}
-
-export interface FactoryLayout {
-  elements: LayoutElement[];
-  connections: Connection[];
-  viewport?: {
-    x: number;
-    y: number;
-    zoom: number;
-  };
-  bom?: {
-    name: string;
-    data: string; // Base64 string
-    type?: 'excel' | 'pdf';
-  };
-  pdfBom?: {
-    name: string;
-    data: string; // Base64 string
-  };
-}
-
-export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
-}
+import { FactoryLayout, LayoutElement, Connection, ElementType, ChatMessage } from './src/types';
+import { BOMModal, PdfBomModal, GenericPdfModal, ImageModal } from './src/components/Modals';
 
 // --- Constants ---
 const INITIAL_LAYOUT: FactoryLayout = {
+  id: 'default-layout',
+  name: 'Sơ đồ nhà máy mặc định',
   elements: [
     // Top Area: RMA / Test
     { id: 'a1', type: 'area', x: 300, y: 210, width: 520, height: 70, name: 'Khu vực RMA / Test', status: 'active', color: '#fff' },
@@ -985,9 +934,15 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isBOMModalOpen, setIsBOMModalOpen] = useState(false);
   const [isPdfBomModalOpen, setIsPdfBomModalOpen] = useState(false);
+  const [isSchematicModalOpen, setIsSchematicModalOpen] = useState(false);
+  const [isProcessModalOpen, setIsProcessModalOpen] = useState(false);
+  const [isModelImageModalOpen, setIsModelImageModalOpen] = useState(false);
   const [bomData, setBomData] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfBomInputRef = useRef<HTMLInputElement>(null);
+  const schematicInputRef = useRef<HTMLInputElement>(null);
+  const processInputRef = useRef<HTMLInputElement>(null);
+  const modelImageInputRef = useRef<HTMLInputElement>(null);
 
   // AI Assistant State
   const [isAIChatOpen, setIsAIChatOpen] = useState(false);
@@ -1328,9 +1283,9 @@ export default function App() {
     layout.elements.forEach(el => {
       if (el.type === 'worker') {
         stats.total++;
-        const level = el.level || 0;
+        const level = Number(el.level || 0);
         if (level >= 0 && level <= 7) {
-          stats.levels[level]++;
+          stats.levels[Math.floor(level)]++;
         }
         if (el.isCTQ) stats.ctq++;
       }
@@ -1474,6 +1429,14 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 50 * 1024 * 1024) {
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: "❌ **Lỗi:** File quá lớn (trên 50MB). Vui lòng nén file hoặc chia nhỏ trước khi tải lên để đảm bảo hiệu suất." 
+      }]);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (event) => {
       const base64 = event.target?.result as string;
@@ -1497,6 +1460,14 @@ export default function App() {
   const handlePdfBomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (file.size > 50 * 1024 * 1024) {
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: "❌ **Lỗi:** File quá lớn (trên 50MB). Vui lòng nén file hoặc chia nhỏ trước khi tải lên để đảm bảo hiệu suất." 
+      }]);
+      return;
+    }
 
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       setChatMessages(prev => [...prev, { 
@@ -1524,6 +1495,101 @@ export default function App() {
     };
     reader.readAsDataURL(file);
   };
+
+  const handleSchematicUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 50 * 1024 * 1024) {
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: "❌ **Lỗi:** File quá lớn (trên 50MB). Vui lòng nén file hoặc chia nhỏ trước khi tải lên để đảm bảo hiệu suất." 
+      }]);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      updateLayoutWithHistory(prev => ({
+        ...prev,
+        schematicPdf: { name: file.name, data: base64 }
+      }));
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: `✅ **Đã tải lên Sơ đồ nguyên lý:** \`${file.name}\`.` 
+      }]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleProcessUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 50 * 1024 * 1024) {
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: "❌ **Lỗi:** File quá lớn (trên 50MB). Vui lòng nén file hoặc chia nhỏ trước khi tải lên để đảm bảo hiệu suất." 
+      }]);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      updateLayoutWithHistory(prev => ({
+        ...prev,
+        processPdf: { name: file.name, data: base64 }
+      }));
+      setChatMessages(prev => [...prev, { 
+        role: 'model', 
+        text: `✅ **Đã tải lên Chi tiết công đoạn:** \`${file.name}\`.` 
+      }]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleModelImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newImages: { name: string; data: string }[] = [];
+    let processedCount = 0;
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        newImages.push({ name: file.name, data: base64 });
+        processedCount++;
+
+        if (processedCount === files.length) {
+          updateLayoutWithHistory(prev => ({
+            ...prev,
+            modelImages: [...(prev.modelImages || []), ...newImages]
+          }));
+          setChatMessages(prev => [...prev, { 
+            role: 'model', 
+            text: `✅ **Đã tải lên ${newImages.length} ảnh mẫu model.**` 
+          }]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeModelImage = (index: number) => {
+    updateLayoutWithHistory(prev => ({
+      ...prev,
+      modelImages: (prev.modelImages || []).filter((_, i) => i !== index)
+    }));
+  };
+
+  const [viewingImageIndex, setViewingImageIndex] = useState<number | null>(null);
+  const viewModelImage = (index: number) => {
+    setViewingImageIndex(index);
+    setIsModelImageModalOpen(true);
+  };
+
+  const viewSchematic = () => setIsSchematicModalOpen(true);
+  const viewProcess = () => setIsProcessModalOpen(true);
 
   const extractWorkersFromBOM = async (base64Data: string, isPdf: boolean, fileName: string) => {
     setIsExtractingBOM(true);
@@ -1781,43 +1847,9 @@ export default function App() {
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
             className="bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 overflow-hidden whitespace-nowrap"
           >
-            <div className="w-64 flex flex-col h-full">
-              <div className="p-6 border-bottom border-slate-100">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="bg-indigo-600 p-2 rounded-lg">
-                    <Factory className="text-white w-5 h-5" />
-                  </div>
-                  {isEditingAppName ? (
-                    <input
-                      autoFocus
-                      type="text"
-                      value={tempAppName}
-                      onChange={(e) => setTempAppName(e.target.value)}
-                      onBlur={saveAppName}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveAppName();
-                        if (e.key === 'Escape') setIsEditingAppName(false);
-                      }}
-                      className="font-bold text-xl tracking-tight w-full outline-none border-b-2 border-indigo-500 bg-transparent"
-                    />
-                  ) : (
-                    <h1 
-                      className="font-bold text-xl tracking-tight cursor-pointer hover:text-indigo-600 transition-colors"
-                      onClick={() => {
-                        setTempAppName(appName);
-                        setIsEditingAppName(true);
-                      }}
-                      title="Nhấp để đổi tên"
-                    >
-                      {appName}
-                    </h1>
-                  )}
-                </div>
-                <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Thiết kế Layout</p>
-              </div>
-
-              <div className="px-4 py-2 border-b border-slate-100">
-                <div className="relative mb-3">
+            <div className="w-64 flex flex-col h-full overflow-y-auto p-4 space-y-6 custom-scrollbar">
+                <div className="space-y-6">
+                  <div className="relative">
                   <button 
                     onClick={() => setIsModelMenuOpen(!isModelMenuOpen)}
                     className="w-full flex items-center justify-between p-2 text-sm font-semibold bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
@@ -1923,6 +1955,45 @@ export default function App() {
                   </AnimatePresence>
                 </div>
 
+                {/* Worker Stats Dashboard - Moved to top for priority */}
+                <section className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <User className="w-3 h-3 text-indigo-600" />
+                      <h2 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Nhân sự Model</h2>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {workerStats.ctq > 0 && (
+                        <div className="bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black">
+                          CTQ: {workerStats.ctq}
+                        </div>
+                      )}
+                      <div className="bg-slate-900 text-white text-[9px] px-2 py-0.5 rounded-full font-bold">
+                        Tổng: {workerStats.total}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {workerStats.levels.map((count, lvl) => (
+                      <div key={lvl} className="flex flex-col items-center gap-0.5 group">
+                        <div 
+                          className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black text-white shadow-sm transition-transform group-hover:scale-110"
+                          style={{ 
+                            backgroundColor: LEVEL_COLORS[lvl],
+                            boxShadow: count > 0 ? `0 2px 8px ${LEVEL_COLORS[lvl]}44` : 'none',
+                            opacity: count > 0 ? 1 : 0.3
+                          }}
+                        >
+                          {lvl}
+                        </div>
+                        <span className={`text-[9px] font-black ${count > 0 ? 'text-slate-800' : 'text-slate-300'}`}>
+                          {count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
                 {/* BOM Section */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -1933,37 +2004,37 @@ export default function App() {
                   </div>
                   
                   {layout.bom ? (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-1">
                       <button 
                         onClick={viewBOM}
                         disabled={isExtractingBOM}
-                        className="flex items-center gap-2 p-2.5 bg-indigo-50 text-indigo-700 rounded-xl hover:bg-indigo-100 transition-all border border-indigo-100 group disabled:opacity-50"
+                        className="flex items-center gap-2 p-1.5 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-all border border-indigo-100 group disabled:opacity-50"
                       >
                         {isExtractingBOM ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Loader2 className="w-3 h-3 animate-spin" />
                         ) : (
-                          <FileText className="w-4 h-4 flex-shrink-0" />
+                          <FileText className="w-3 h-3 flex-shrink-0" />
                         )}
-                        <span className="text-xs font-bold truncate flex-1 text-left">
-                          {isExtractingBOM ? 'Đang trích xuất dữ liệu...' : layout.bom.name}
+                        <span className="text-[10px] font-bold truncate flex-1 text-left">
+                          {isExtractingBOM ? 'Đang trích xuất...' : layout.bom.name}
                         </span>
-                        {!isExtractingBOM && <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                        {!isExtractingBOM && <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />}
                       </button>
                       <button 
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isExtractingBOM}
-                        className="text-[10px] text-slate-400 hover:text-indigo-600 font-bold flex items-center gap-1 px-1 disabled:opacity-50"
+                        className="text-[9px] text-slate-400 hover:text-indigo-600 font-bold flex items-center gap-1 px-1 disabled:opacity-50"
                       >
-                        <Upload className="w-3 h-3" /> Thay đổi file BOM
+                        <Upload className="w-2.5 h-2.5" /> Thay đổi BOM
                       </button>
                     </div>
                   ) : (
                     <button 
                       onClick={() => fileInputRef.current?.click()}
-                      className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-indigo-300 hover:bg-indigo-50 transition-all group"
+                      className="w-full flex items-center justify-center gap-2 p-2 border-2 border-dashed border-slate-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 transition-all group"
                     >
-                      <Upload className="w-4 h-4 text-slate-400 group-hover:text-indigo-500" />
-                      <span className="text-xs font-bold text-slate-500 group-hover:text-indigo-600">Tải lên file BOM (.xlsx, .pdf)</span>
+                      <Upload className="w-3 h-3 text-slate-400 group-hover:text-indigo-500" />
+                      <span className="text-[10px] font-bold text-slate-500 group-hover:text-indigo-600">Tải lên BOM</span>
                     </button>
                   )}
                   <input 
@@ -1985,31 +2056,31 @@ export default function App() {
                   </div>
                   
                   {layout.pdfBom ? (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-1">
                       <button 
                         onClick={viewPdfBom}
-                        className="flex items-center gap-2 p-2.5 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 transition-all border border-blue-100 group"
+                        className="flex items-center gap-2 p-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-all border border-blue-100 group"
                       >
-                        <FileText className="w-4 h-4 flex-shrink-0" />
-                        <span className="text-xs font-bold truncate flex-1 text-left">
+                        <FileText className="w-3 h-3 flex-shrink-0" />
+                        <span className="text-[10px] font-bold truncate flex-1 text-left">
                           {layout.pdfBom.name}
                         </span>
-                        <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </button>
                       <button 
                         onClick={() => pdfBomInputRef.current?.click()}
-                        className="text-[10px] text-slate-400 hover:text-blue-600 font-bold flex items-center gap-1 px-1"
+                        className="text-[9px] text-slate-400 hover:text-blue-600 font-bold flex items-center gap-1 px-1"
                       >
-                        <Upload className="w-3 h-3" /> Thay đổi file PDF
+                        <Upload className="w-2.5 h-2.5" /> Thay đổi PDF
                       </button>
                     </div>
                   ) : (
                     <button 
                       onClick={() => pdfBomInputRef.current?.click()}
-                      className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-slate-200 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all group"
+                      className="w-full flex items-center justify-center gap-2 p-2 border-2 border-dashed border-slate-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-all group"
                     >
-                      <Upload className="w-4 h-4 text-slate-400 group-hover:text-blue-500" />
-                      <span className="text-xs font-bold text-slate-500 group-hover:text-blue-600">Tải lên PDF BOM (Chỉ xem)</span>
+                      <Upload className="w-3 h-3 text-slate-400 group-hover:text-blue-500" />
+                      <span className="text-[10px] font-bold text-slate-500 group-hover:text-blue-600">Tải lên PDF BOM</span>
                     </button>
                   )}
                   <input 
@@ -2020,47 +2091,153 @@ export default function App() {
                     className="hidden"
                   />
                 </div>
-              </div>
 
-              <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
-                {/* Worker Stats Dashboard */}
-                <section className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <User className="w-3 h-3 text-indigo-600" />
-                      <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nhân sự Model</h2>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {workerStats.ctq > 0 && (
-                        <div className="bg-red-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black">
-                          CTQ: {workerStats.ctq}
-                        </div>
-                      )}
-                      <div className="bg-slate-900 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
-                        Tổng: {workerStats.total}
-                      </div>
-                    </div>
+                {/* Schematic Section */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sơ đồ nguyên lý</p>
+                    {layout.schematicPdf && (
+                      <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-bold">Đã tải</span>
+                    )}
                   </div>
-                  <div className="grid grid-cols-4 gap-3">
-                    {workerStats.levels.map((count, lvl) => (
-                      <div key={lvl} className="flex flex-col items-center gap-1 group">
-                        <div 
-                          className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-black text-white shadow-sm transition-transform group-hover:scale-110"
-                          style={{ 
-                            backgroundColor: LEVEL_COLORS[lvl],
-                            boxShadow: count > 0 ? `0 4px 12px ${LEVEL_COLORS[lvl]}44` : 'none',
-                            opacity: count > 0 ? 1 : 0.3
-                          }}
-                        >
-                          {lvl}
-                        </div>
-                        <span className={`text-[10px] font-black ${count > 0 ? 'text-slate-800' : 'text-slate-300'}`}>
-                          {count}
+                  
+                  {layout.schematicPdf ? (
+                    <div className="flex flex-col gap-1">
+                      <button 
+                        onClick={viewSchematic}
+                        className="flex items-center gap-2 p-1.5 bg-orange-50 text-orange-700 rounded-lg hover:bg-orange-100 transition-all border border-orange-100 group"
+                      >
+                        <FileText className="w-3 h-3 flex-shrink-0" />
+                        <span className="text-[10px] font-bold truncate flex-1 text-left">
+                          {layout.schematicPdf.name}
                         </span>
+                        <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                      <button 
+                        onClick={() => schematicInputRef.current?.click()}
+                        className="text-[9px] text-slate-400 hover:text-orange-600 font-bold flex items-center gap-1 px-1"
+                      >
+                        <Upload className="w-2.5 h-2.5" /> Thay đổi PDF
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => schematicInputRef.current?.click()}
+                      className="w-full flex items-center justify-center gap-2 p-2 border-2 border-dashed border-slate-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-all group"
+                    >
+                      <Upload className="w-3 h-3 text-slate-400 group-hover:text-orange-500" />
+                      <span className="text-[10px] font-bold text-slate-500 group-hover:text-orange-600">Tải lên Sơ đồ</span>
+                    </button>
+                  )}
+                  <input 
+                    type="file" 
+                    ref={schematicInputRef}
+                    onChange={handleSchematicUpload}
+                    accept=".pdf"
+                    className="hidden"
+                  />
+                </div>
+
+                {/* Process Details Section */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Chi tiết công đoạn</p>
+                    {layout.processPdf && (
+                      <span className="text-[9px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-bold">Đã tải</span>
+                    )}
+                  </div>
+                  
+                  {layout.processPdf ? (
+                    <div className="flex flex-col gap-1">
+                      <button 
+                        onClick={viewProcess}
+                        className="flex items-center gap-2 p-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-all border border-purple-100 group"
+                      >
+                        <FileText className="w-3 h-3 flex-shrink-0" />
+                        <span className="text-[10px] font-bold truncate flex-1 text-left">
+                          {layout.processPdf.name}
+                        </span>
+                        <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                      <button 
+                        onClick={() => processInputRef.current?.click()}
+                        className="text-[9px] text-slate-400 hover:text-purple-600 font-bold flex items-center gap-1 px-1"
+                      >
+                        <Upload className="w-2.5 h-2.5" /> Thay đổi PDF
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => processInputRef.current?.click()}
+                      className="w-full flex items-center justify-center gap-2 p-2 border-2 border-dashed border-slate-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-all group"
+                    >
+                      <Upload className="w-3 h-3 text-slate-400 group-hover:text-purple-500" />
+                      <span className="text-[10px] font-bold text-slate-500 group-hover:text-purple-600">Tải lên Công đoạn</span>
+                    </button>
+                  )}
+                  <input 
+                    type="file" 
+                    ref={processInputRef}
+                    onChange={handleProcessUpload}
+                    accept=".pdf"
+                    className="hidden"
+                  />
+                </div>
+
+                {/* Model Image Section */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Ảnh mẫu model</p>
+                    {layout.modelImages && layout.modelImages.length > 0 && (
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">
+                        {layout.modelImages.length} ảnh
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-1">
+                    {layout.modelImages?.map((img, idx) => (
+                      <div key={idx} className="flex items-center gap-1 group">
+                        <button 
+                          onClick={() => viewModelImage(idx)}
+                          className="flex-1 flex items-center gap-2 p-1.5 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-all border border-emerald-100 overflow-hidden"
+                        >
+                          <ImageIcon className="w-3 h-3 flex-shrink-0" />
+                          <span className="text-[10px] font-bold truncate text-left">
+                            {img.name}
+                          </span>
+                          <ExternalLink className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
+                        </button>
+                        <button 
+                          onClick={() => removeModelImage(idx)}
+                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          title="Xóa ảnh"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
                     ))}
                   </div>
-                </section>
+
+                  <button 
+                    onClick={() => modelImageInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 p-2 border-2 border-dashed border-slate-200 rounded-lg hover:border-emerald-300 hover:bg-emerald-50 transition-all group"
+                  >
+                    <Upload className="w-3 h-3 text-slate-400 group-hover:text-emerald-500" />
+                    <span className="text-[10px] font-bold text-slate-500 group-hover:text-emerald-600">
+                      {layout.modelImages && layout.modelImages.length > 0 ? 'Thêm ảnh mẫu' : 'Tải lên Ảnh mẫu'}
+                    </span>
+                  </button>
+                  
+                  <input 
+                    type="file" 
+                    ref={modelImageInputRef}
+                    onChange={handleModelImageUpload}
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                  />
+                </div>
 
                 <section>
                   <h2 className="text-xs font-semibold text-slate-400 uppercase mb-3 px-2">Thêm thiết bị</h2>
@@ -2254,7 +2431,7 @@ export default function App() {
                     <p className="text-[10px] text-slate-500 italic">Bạn có thể di chuyển hoặc xóa các đối tượng đã chọn cùng lúc.</p>
                   </motion.section>
                 )}
-              </nav>
+                </div>
             </div>
           </motion.aside>
         )}
@@ -2415,214 +2592,47 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* BOM Viewer Modal */}
-          <AnimatePresence>
-            {isBOMModalOpen && (
-              <div className={`fixed inset-0 z-[100] flex items-center justify-center ${layout.bom?.type === 'pdf' ? 'p-0' : 'p-4 sm:p-10'}`}>
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setIsBOMModalOpen(false)}
-                  className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-                />
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className={`relative w-full h-full bg-white shadow-2xl flex flex-col overflow-hidden ${layout.bom?.type === 'pdf' ? 'rounded-none' : 'rounded-3xl'}`}
-                >
-                  <div className={`border-b border-slate-100 flex items-center justify-between bg-slate-50/50 ${layout.bom?.type === 'pdf' ? 'p-3' : 'p-6'}`}>
-                    <div className="flex items-center gap-4">
-                      <div className={`${layout.bom?.type === 'pdf' ? 'p-1.5' : 'p-3'} bg-indigo-100 rounded-2xl`}>
-                        <FileText className={`${layout.bom?.type === 'pdf' ? 'w-4 h-4' : 'w-6 h-6'} text-indigo-600`} />
-                      </div>
-                      <div>
-                        <h2 className={`${layout.bom?.type === 'pdf' ? 'text-sm' : 'text-xl'} font-black text-slate-800 tracking-tight`}>Danh mục vật tư (BOM)</h2>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{layout.bom?.name}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => setIsBOMModalOpen(false)}
-                      className="p-2 hover:bg-slate-200 rounded-xl text-slate-400 transition-all hover:text-slate-600 active:scale-90"
-                    >
-                      <X className={`${layout.bom?.type === 'pdf' ? 'w-5 h-5' : 'w-6 h-6'}`} />
-                    </button>
-                  </div>
-                  
-                  <div className={`flex-1 overflow-auto bg-slate-50 ${layout.bom?.type === 'pdf' ? 'p-0' : 'p-6'}`}>
-                    {layout.bom?.type === 'pdf' ? (
-                      <div className="w-full h-full overflow-hidden">
-                        <iframe 
-                          src={layout.bom.data} 
-                          className="w-full h-full border-none" 
-                          title="BOM PDF Viewer"
-                        />
-                      </div>
-                    ) : bomData.length > 0 ? (
-                      <div className="inline-block min-w-full align-middle">
-                        <div className="bg-white p-8 shadow-inner rounded-sm border border-slate-300">
-                          <table className="min-w-full border-collapse bom-table text-slate-900">
-                            <tbody>
-                              {bomData.map((row: any[], rowIdx: number) => {
-                                // If it's the first row and it has only one value (or mostly empty), it's the title
-                                const isTitleRow = rowIdx === 0 && row.filter(c => c !== null && c !== '').length <= 2;
-                                
-                                if (isTitleRow) {
-                                  return (
-                                    <tr key={rowIdx}>
-                                      <td 
-                                        colSpan={8} 
-                                        className="text-center py-6 text-3xl font-black uppercase tracking-tighter border-b-2 border-slate-900"
-                                      >
-                                        {row.find(c => c !== null && c !== '')}
-                                      </td>
-                                    </tr>
-                                  );
-                                }
+          {/* Modals */}
+          <BOMModal 
+            isOpen={isBOMModalOpen} 
+            onClose={() => setIsBOMModalOpen(false)} 
+            layout={layout} 
+            bomData={bomData} 
+            exportBOMToPDF={exportBOMToPDF} 
+          />
 
-                                // Header row (usually row 1 or the first row with many columns)
-                                const isHeaderRow = rowIdx === 1 || (rowIdx === 0 && !isTitleRow);
+          <PdfBomModal 
+            isOpen={isPdfBomModalOpen} 
+            onClose={() => setIsPdfBomModalOpen(false)} 
+            layout={layout} 
+          />
 
-                                return (
-                                  <tr key={rowIdx} className={isHeaderRow ? "bg-slate-100" : "hover:bg-slate-50 transition-colors"}>
-                                    {row.map((cell: any, cellIdx: number) => {
-                                      if (cellIdx >= 8) return null; // Only show first 8 columns based on screenshot
-                                      
-                                      const cellValue = cell === null || cell === undefined ? "" : String(cell);
-                                      
-                                      if (isHeaderRow) {
-                                        return (
-                                          <th 
-                                            key={cellIdx} 
-                                            className="px-4 py-3 text-xs font-black uppercase tracking-tight border border-slate-900"
-                                          >
-                                            {cellValue}
-                                          </th>
-                                        );
-                                      }
+          <GenericPdfModal
+            isOpen={isSchematicModalOpen}
+            onClose={() => setIsSchematicModalOpen(false)}
+            data={layout.schematicPdf?.data}
+            name={layout.schematicPdf?.name}
+            title="Sơ đồ nguyên lý"
+          />
 
-                                      // Data cells
-                                      return (
-                                        <td 
-                                          key={cellIdx} 
-                                          className={`px-4 py-2 text-xs border border-slate-900 ${
-                                            cellIdx === 0 || cellIdx === 2 || cellIdx === 4 || cellIdx === 7 ? "text-center" : "text-left"
-                                          } ${cellIdx === 5 || cellIdx === 6 ? "font-medium" : ""}`}
-                                        >
-                                          {cellValue.includes('\n') ? (
-                                            <div className="whitespace-pre-line">
-                                              {cellValue}
-                                            </div>
-                                          ) : (
-                                            cellValue
-                                          )}
-                                        </td>
-                                      );
-                                    })}
-                                    {/* Pad row if it has fewer than 8 columns */}
-                                    {row.length < 8 && !isTitleRow && Array.from({ length: 8 - row.length }).map((_, i) => (
-                                      <td key={`pad-${i}`} className="border border-slate-900"></td>
-                                    ))}
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="h-64 flex flex-col items-center justify-center text-slate-400 gap-4">
-                        <AlertCircle className="w-12 h-12 opacity-20" />
-                        <p className="font-bold">Không có dữ liệu hiển thị</p>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {layout.bom?.type !== 'pdf' && (
-                    <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-                      <button 
-                        onClick={exportBOMToPDF}
-                        className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-sm font-bold hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-100 flex items-center gap-2"
-                      >
-                        <Download className="w-4 h-4" />
-                        Xuất PDF
-                      </button>
-                      <button 
-                        onClick={() => setIsBOMModalOpen(false)}
-                        className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
-                      >
-                        Đóng bảng BOM
-                      </button>
-                    </div>
-                  )}
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
+          <GenericPdfModal
+            isOpen={isProcessModalOpen}
+            onClose={() => setIsProcessModalOpen(false)}
+            data={layout.processPdf?.data}
+            name={layout.processPdf?.name}
+            title="Chi tiết công đoạn"
+          />
 
-          {/* PDF BOM Viewer Modal (Only View) */}
-          <AnimatePresence>
-            {isPdfBomModalOpen && (
-              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setIsPdfBomModalOpen(false)}
-                  className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
-                />
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className="relative w-full max-w-6xl h-full max-h-[90vh] bg-white rounded-[40px] shadow-2xl overflow-hidden flex flex-col border border-white"
-                >
-                  <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-10">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
-                        <FileText className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <h2 className="text-xl font-black text-slate-800 tracking-tight">Xem file BOM PDF</h2>
-                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{layout.pdfBom?.name}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => setIsPdfBomModalOpen(false)}
-                      className="p-3 hover:bg-slate-100 rounded-2xl text-slate-400 transition-all hover:text-slate-600 active:scale-90"
-                    >
-                      <X className="w-6 h-6" />
-                    </button>
-                  </div>
-                  
-                  <div className="flex-1 overflow-hidden bg-slate-100">
-                    {layout.pdfBom ? (
-                      <iframe 
-                        src={layout.pdfBom.data} 
-                        className="w-full h-full border-none" 
-                        title="PDF BOM Viewer"
-                      />
-                    ) : (
-                      <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
-                        <AlertCircle className="w-12 h-12 opacity-20" />
-                        <p className="font-bold">Không có file PDF để hiển thị</p>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="p-6 border-t border-slate-100 bg-white flex justify-end">
-                    <button 
-                      onClick={() => setIsPdfBomModalOpen(false)}
-                      className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
-                    >
-                      Đóng
-                    </button>
-                  </div>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
+          <ImageModal 
+            isOpen={isModelImageModalOpen} 
+            onClose={() => {
+              setIsModelImageModalOpen(false);
+              setViewingImageIndex(null);
+            }} 
+            data={viewingImageIndex !== null ? layout.modelImages?.[viewingImageIndex]?.data : undefined}
+            name={viewingImageIndex !== null ? layout.modelImages?.[viewingImageIndex]?.name : undefined}
+            title="Ảnh mẫu model" 
+          />
         </div>
       </main>
     </div>
